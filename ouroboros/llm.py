@@ -1,6 +1,6 @@
 """
 Ouroboros — LLM client.
-Supports provider routing for OpenRouter, OpenAI, and z.ai.
+Supports provider routing for OpenRouter, OpenAI, z.ai, OpenCode, and OpenAI Codex.
 """
 
 from __future__ import annotations
@@ -15,7 +15,9 @@ log = logging.getLogger(__name__)
 DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
+OPENAI_CODEX_BASE_URL = "https://api.openai.com/v1"
 ZAI_BASE_URL = "https://api.z.ai/api/paas/v4"
+OPENCODE_BASE_URL = "https://api.opencode.ai/v1"
 
 
 def normalize_reasoning_effort(value: str, default: str = "medium") -> str:
@@ -50,13 +52,18 @@ class LLMClient:
         provider_pref = (os.environ.get("OUROBOROS_LLM_PROVIDER", "auto") or "auto").strip().lower()
         openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
         openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        openai_codex_key = os.environ.get("OPENAI_CODEX_KEY", "").strip()
         zai_key = os.environ.get("ZAI_API_KEY", "").strip()
+        opencode_key = os.environ.get("OPENCODE_API_KEY", "").strip()
         openai_base = (os.environ.get("OPENAI_BASE_URL") or OPENAI_BASE_URL).strip()
+        openai_codex_base = (os.environ.get("OPENAI_CODEX_BASE_URL") or OPENAI_CODEX_BASE_URL).strip()
         zai_base = (os.environ.get("ZAI_BASE_URL") or ZAI_BASE_URL).strip()
+        opencode_base = (os.environ.get("OPENCODE_BASE_URL") or OPENCODE_BASE_URL).strip()
 
         m = (model or "").strip()
         ml = m.lower()
 
+        # Explicit provider preference
         if provider_pref == "openrouter":
             if not openrouter_key:
                 raise ValueError("OPENROUTER_API_KEY not set")
@@ -65,24 +72,53 @@ class LLMClient:
             if not openai_key:
                 raise ValueError("OPENAI_API_KEY not set")
             return "openai", _strip_provider_prefix(m) if ml.startswith("openai/") else m, openai_key, openai_base
+        if provider_pref == "openai-codex":
+            if not openai_codex_key:
+                # Fall back to OPENAI_API_KEY if codex key not set
+                openai_codex_key = openai_key
+            if not openai_codex_key:
+                raise ValueError("OPENAI_CODEX_KEY or OPENAI_API_KEY not set")
+            return "openai", _strip_provider_prefix(m) if ml.startswith(("openai-codex/", "codex/")) else m, openai_codex_key, openai_codex_base
         if provider_pref == "zai":
             if not zai_key:
                 raise ValueError("ZAI_API_KEY not set")
-            return "zai", _strip_provider_prefix(m) if ml.startswith(("zai/", "z-ai/")) else m, zai_key, zai_base
+            return "zai", _strip_provider_prefix(m) if "/" in m else m, zai_key, zai_base
+        if provider_pref == "opencode":
+            if not opencode_key:
+                raise ValueError("OPENCODE_API_KEY not set")
+            return "opencode", _strip_provider_prefix(m) if ml.startswith("opencode/") else m, opencode_key, opencode_base
 
+        # Model prefix detection
         if ml.startswith(("anthropic/", "openai/", "google/", "meta-llama/", "x-ai/", "qwen/", "mistralai/", "deepseek/")) and openrouter_key:
             return "openrouter", m, openrouter_key, OPENROUTER_BASE_URL
-        if (ml.startswith(("zai/", "z-ai/", "glm-")) and zai_key):
+        if ml.startswith(("zai/", "z-ai/", "glm-")) and zai_key:
             return "zai", _strip_provider_prefix(m) if "/" in m else m, zai_key, zai_base
+        if ml.startswith(("opencode/", "open-code/")) and opencode_key:
+            return "opencode", _strip_provider_prefix(m) if ml.startswith(("opencode/", "open-code/")) else m, opencode_key, opencode_base
+        if ml.startswith(("openai-codex/", "codex/")):
+            key = openai_codex_key or openai_key
+            if not key:
+                raise ValueError("OPENAI_CODEX_KEY or OPENAI_API_KEY not set")
+            return "openai", _strip_provider_prefix(m) if ml.startswith(("openai-codex/", "codex/")) else m, key, openai_codex_base
         if (ml.startswith(("openai/", "gpt-", "o1", "o3", "o4")) and openai_key):
             return "openai", _strip_provider_prefix(m) if ml.startswith("openai/") else m, openai_key, openai_base
 
+        # Special models
+        if ml == "gpt-5.3-codex":
+            key = openai_codex_key or openai_key
+            if not key:
+                raise ValueError("OPENAI_CODEX_KEY or OPENAI_API_KEY not set for gpt-5.3-codex")
+            return "openai", m, key, openai_codex_base
+
+        # Fallback priority
         if openrouter_key:
             return "openrouter", m, openrouter_key, OPENROUTER_BASE_URL
         if openai_key:
             return "openai", _strip_provider_prefix(m) if ml.startswith("openai/") else m, openai_key, openai_base
         if zai_key:
             return "zai", _strip_provider_prefix(m) if ml.startswith(("zai/", "z-ai/")) else m, zai_key, zai_base
+        if opencode_key:
+            return "opencode", _strip_provider_prefix(m) if ml.startswith("opencode/") else m, opencode_key, opencode_base
 
         raise ValueError("No LLM API key configured")
 
