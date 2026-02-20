@@ -1,91 +1,61 @@
-"""Tavily web search tool."""
-
-from __future__ import annotations
-
-import json
+"""
+Tavily Search MCP client
+"""
 import os
-from typing import Any, Dict, List
+from typing import Dict, Any, Optional
+from tavily import TavilyClient
+import json
 
-from ouroboros.tools.registry import ToolContext, ToolEntry
+# API key - will be set from env or use fallback
+API_KEY = os.environ.get("TAVILY_API_KEY", "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")
 
+_client: Optional[TavilyClient] = None
 
-def _tavily_search(ctx: ToolContext, query: str, max_results: int = 10, search_depth: str = "basic") -> str:
+def get_client() -> TavilyClient:
+    """Get or create Tavily client"""
+    global _client
+    if _client is None:
+        _client = TavilyClient(api_key=API_KEY)
+    return _client
+
+def search(query: str, max_results: int = 10) -> Dict[str, Any]:
     """
-    Search the web using Tavily API.
+    Perform a web search using Tavily
     
     Args:
-        query: Search query string
-        max_results: Maximum number of results (1-10, default 10)
-        search_depth: "basic" (faster, cheaper) or "advanced" (deeper research)
+        query: Search query
+        max_results: Maximum number of results
+        
+    Returns:
+        Search results with answer and sources
     """
-    api_key = os.environ.get("TAVILY_API_KEY", "")
-    if not api_key:
-        return json.dumps({"error": "TAVILY_API_KEY not set; tavily_search unavailable."})
-    
     try:
-        # Try to import tavily-python
-        from tavily import TavilyClient
-    except ImportError:
-        return json.dumps({
-            "error": "tavily-python not installed. Install with: pip install tavily-python"
-        })
-    
-    try:
-        client = TavilyClient(api_key=api_key)
-        response = client.search(
-            query=query,
-            max_results=max_results,
-            search_depth=search_depth,
-            include_answer=True,
-            include_raw_content=False,
-            include_images=False,
-        )
-        
-        # Extract key information
-        result = {
-            "query": query,
-            "answer": response.get("answer", ""),
-            "results": []
-        }
-        
-        for item in response.get("results", [])[:max_results]:
-            result["results"].append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "content": item.get("content", "")[:500],  # Truncate long content
-                "score": item.get("score", 0)
-            })
-        
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    
+        client = get_client()
+        result = client.search(query=query, max_results=max_results)
+        return result
     except Exception as e:
-        return json.dumps({"error": repr(e)}, ensure_ascii=False)
+        return {"error": str(e), "query": query}
 
+def get_search_context(query: str, max_tokens: int = 4000) -> Dict[str, Any]:
+    """
+    Get search context (content from web pages)
+    
+    Args:
+        query: Search query
+        max_tokens: Maximum tokens in response
+        
+    Returns:
+        Search context
+    """
+    try:
+        client = get_client()
+        result = client.get_search_context(query=query, max_tokens=max_tokens)
+        return result
+    except Exception as e:
+        return {"error": str(e), "query": query}
 
-def get_tools() -> List[ToolEntry]:
-    return [
-        ToolEntry("tavily_search", {
-            "name": "tavily_search",
-            "description": "Search the web via Tavily API. Returns JSON with answer + sources.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of results (1-10, default 10)",
-                        "default": 10,
-                        "minimum": 1,
-                        "maximum": 10
-                    },
-                    "search_depth": {
-                        "type": "string",
-                        "description": "Search depth: 'basic' (fast/cheap) or 'advanced' (deeper)",
-                        "default": "basic",
-                        "enum": ["basic", "advanced"]
-                    }
-                },
-                "required": ["query"]
-            },
-        }, _tavily_search),
-    ]
+# For direct import and use
+if __name__ == "__main__":
+    # Test search
+    result = search("wibes.ru антибот защита")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
