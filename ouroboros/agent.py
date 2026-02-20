@@ -149,6 +149,13 @@ class OuroborosAgent:
             )
             dirty_files = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
             if dirty_files:
+                auto_rescue_disabled = str(os.environ.get("OUROBOROS_DISABLE_AUTO_RESCUE", "0")).strip().lower() in {"1", "true", "yes", "on"}
+                if auto_rescue_disabled:
+                    return {
+                        "status": "warning", "files": dirty_files[:20],
+                        "auto_committed": False, "auto_rescue_disabled": True,
+                    }, 1
+
                 # Auto-rescue: commit and push
                 auto_committed = False
                 try:
