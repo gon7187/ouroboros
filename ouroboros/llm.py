@@ -52,40 +52,6 @@ def _strip_provider_prefix(model: str) -> str:
     return model.split("/", 1)[1] if "/" in model else model
 
 
-def fetch_openrouter_pricing() -> Dict[str, Dict[str, float]]:
-    """Fetch current pricing from OpenRouter API and update MODEL_PRICING."""
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if not api_key:
-        log.debug("No OpenRouter API key, skipping pricing fetch")
-        return MODEL_PRICING.copy()
-
-    try:
-        import requests
-        url = f"{OPENROUTER_BASE_URL}/models"
-        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
-        if resp.status_code != 200:
-            log.warning(f"Failed to fetch OpenRouter pricing: HTTP {resp.status_code}")
-            return MODEL_PRICING.copy()
-
-        data = resp.json()
-        updated = 0
-        for model_data in data.get("data", []):
-            model_id = model_data.get("id", "")
-            pricing = model_data.get("pricing", {})
-            if model_id and isinstance(pricing, dict):
-                prompt_price = float(pricing.get("prompt", 0))
-                completion_price = float(pricing.get("completion", 0))
-                if prompt_price > 0 or completion_price > 0:
-                    MODEL_PRICING[model_id] = {"prompt": prompt_price, "completion": completion_price}
-                    updated += 1
-
-        log.info(f"Updated pricing for {updated} models from OpenRouter")
-    except Exception as e:
-        log.warning(f"Failed to fetch OpenRouter pricing: {e}")
-
-    return MODEL_PRICING.copy()
-
-
 class LLMClient:
     def __init__(self, api_key: Optional[str] = None, base_url: str = OPENROUTER_BASE_URL):
         self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
@@ -283,3 +249,41 @@ class LLMClient:
         if light and light != main and light != code:
             models.append(light)
         return models
+
+
+def fetch_openrouter_pricing() -> Dict[str, Dict[str, float]]:
+    """Fetch current pricing from OpenRouter API and update MODEL_PRICING.
+    
+    Returns the updated MODEL_PRICING dictionary. If API key is not configured
+    or API call fails, returns the current baseline pricing.
+    """
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        log.debug("No OpenRouter API key, skipping pricing fetch")
+        return MODEL_PRICING.copy()
+
+    try:
+        import requests
+        url = f"{OPENROUTER_BASE_URL}/models"
+        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
+        if resp.status_code != 200:
+            log.warning(f"Failed to fetch OpenRouter pricing: HTTP {resp.status_code}")
+            return MODEL_PRICING.copy()
+
+        data = resp.json()
+        updated = 0
+        for model_data in data.get("data", []):
+            model_id = model_data.get("id", "")
+            pricing = model_data.get("pricing", {})
+            if model_id and isinstance(pricing, dict):
+                prompt_price = float(pricing.get("prompt", 0))
+                completion_price = float(pricing.get("completion", 0))
+                if prompt_price > 0 or completion_price > 0:
+                    MODEL_PRICING[model_id] = {"prompt": prompt_price, "completion": completion_price}
+                    updated += 1
+
+        log.info(f"Updated pricing for {updated} models from OpenRouter")
+    except Exception as e:
+        log.warning(f"Failed to fetch OpenRouter pricing: {e}")
+
+    return MODEL_PRICING.copy()
