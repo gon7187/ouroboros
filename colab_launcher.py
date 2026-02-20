@@ -50,8 +50,14 @@ install_apply_patch()
 # ----------------------------
 # 1) Secrets + runtime config
 # ----------------------------
-from google.colab import userdata  # type: ignore
-from google.colab import drive  # type: ignore
+try:
+    from google.colab import userdata  # type: ignore
+    from google.colab import drive  # type: ignore
+    IS_COLAB_RUNTIME = True
+except Exception:
+    userdata = None  # type: ignore
+    drive = None  # type: ignore
+    IS_COLAB_RUNTIME = False
 
 _LEGACY_CFG_WARNED: Set[str] = set()
 
@@ -90,7 +96,12 @@ def _parse_int_cfg(raw: Optional[str], default: int, minimum: int = 0) -> int:
         val = default
     return max(minimum, val)
 
-OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY", required=True)
+OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY", default="")
+OPENAI_API_KEY = get_secret("OPENAI_API_KEY", default="")
+ZAI_API_KEY = get_secret("ZAI_API_KEY", default="")
+if not any(str(v or "").strip() for v in (OPENROUTER_API_KEY, OPENAI_API_KEY, ZAI_API_KEY)):
+    raise AssertionError("Missing LLM key: set at least one of OPENROUTER_API_KEY, OPENAI_API_KEY, or ZAI_API_KEY")
+
 TELEGRAM_BOT_TOKEN = get_secret("TELEGRAM_BOT_TOKEN", required=True)
 TOTAL_BUDGET_DEFAULT = get_secret("TOTAL_BUDGET", required=True)
 GITHUB_TOKEN = get_secret("GITHUB_TOKEN", required=True)
@@ -108,7 +119,6 @@ except Exception as e:
     log.warning(f"Failed to parse TOTAL_BUDGET ({TOTAL_BUDGET_DEFAULT!r}): {e}")
     TOTAL_BUDGET_LIMIT = 0.0
 
-OPENAI_API_KEY = get_secret("OPENAI_API_KEY", default="")
 ANTHROPIC_API_KEY = get_secret("ANTHROPIC_API_KEY", default="")
 GITHUB_USER = get_cfg("GITHUB_USER", default=None, allow_legacy_secret=True)
 GITHUB_REPO = get_cfg("GITHUB_REPO", default=None, allow_legacy_secret=True)
@@ -133,8 +143,9 @@ DIAG_SLOW_CYCLE_SEC = _parse_int_cfg(
     minimum=0,
 )
 
-os.environ["OPENROUTER_API_KEY"] = str(OPENROUTER_API_KEY)
+os.environ["OPENROUTER_API_KEY"] = str(OPENROUTER_API_KEY or "")
 os.environ["OPENAI_API_KEY"] = str(OPENAI_API_KEY or "")
+os.environ["ZAI_API_KEY"] = str(ZAI_API_KEY or "")
 os.environ["ANTHROPIC_API_KEY"] = str(ANTHROPIC_API_KEY or "")
 os.environ["GITHUB_USER"] = str(GITHUB_USER)
 os.environ["GITHUB_REPO"] = str(GITHUB_REPO)
@@ -150,13 +161,20 @@ if str(ANTHROPIC_API_KEY or "").strip():
     ensure_claude_code_cli()
 
 # ----------------------------
-# 2) Mount Drive
+# 2) Storage paths (Colab Drive or local filesystem)
 # ----------------------------
-if not pathlib.Path("/content/drive/MyDrive").exists():
-    drive.mount("/content/drive")
-
-DRIVE_ROOT = pathlib.Path("/content/drive/MyDrive/Ouroboros").resolve()
-REPO_DIR = pathlib.Path("/content/ouroboros_repo").resolve()
+if IS_COLAB_RUNTIME:
+    if not pathlib.Path("/content/drive/MyDrive").exists():
+        drive.mount("/content/drive")
+    DRIVE_ROOT = pathlib.Path("/content/drive/MyDrive/Ouroboros").resolve()
+    REPO_DIR = pathlib.Path("/content/ouroboros_repo").resolve()
+else:
+    DRIVE_ROOT = pathlib.Path(
+        os.environ.get("OUROBOROS_DATA_DIR", str(pathlib.Path.home() / ".local" / "share" / "Ouroboros"))
+    ).resolve()
+    REPO_DIR = pathlib.Path(
+        os.environ.get("OUROBOROS_REPO_DIR", str(pathlib.Path(__file__).resolve().parent))
+    ).resolve()
 
 for sub in ["state", "logs", "memory", "index", "locks", "archive"]:
     (DRIVE_ROOT / sub).mkdir(parents=True, exist_ok=True)
@@ -184,8 +202,8 @@ if not CHAT_LOG_PATH.exists():
 # ----------------------------
 # 3) Git constants
 # ----------------------------
-BRANCH_DEV = "ouroboros"
-BRANCH_STABLE = "ouroboros-stable"
+BRANCH_DEV = str(os.environ.get("OUROBOROS_BRANCH_DEV", "ouroboros")).strip() or "ouroboros"
+BRANCH_STABLE = str(os.environ.get("OUROBOROS_BRANCH_STABLE", f"{BRANCH_DEV}-stable")).strip() or f"{BRANCH_DEV}-stable"
 REMOTE_URL = f"https://{GITHUB_TOKEN}:x-oauth-basic@github.com/{GITHUB_USER}/{GITHUB_REPO}.git"
 
 # ----------------------------
@@ -243,8 +261,12 @@ from supervisor.events import dispatch_event
 # 5) Bootstrap repo
 # ----------------------------
 ensure_repo_present()
-ok, msg = safe_restart(reason="bootstrap", unsynced_policy="rescue_and_reset")
-assert ok, f"Bootstrap failed: {msg}"
+SKIP_BOOTSTRAP_RESET = str(os.environ.get("OUROBOROS_SKIP_BOOTSTRAP_RESET", "0")).strip().lower() in {"1", "true", "yes", "on"}
+if not SKIP_BOOTSTRAP_RESET:
+    ok, msg = safe_restart(reason="bootstrap", unsynced_policy="rescue_and_reset")
+    assert ok, f"Bootstrap failed: {msg}"
+else:
+    log.warning("Skipping bootstrap git reset (OUROBOROS_SKIP_BOOTSTRAP_RESET=1)")
 
 # ----------------------------
 # 6) Start workers

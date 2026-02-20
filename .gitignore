@@ -18,6 +18,12 @@ dist/
 build/
 .pytest_cache/
 .mypy_cache/
+.venv/
+
+# Local runtime artifacts
+.runtime/
+run-zai.sh
+=1.0.0
 
 # OS
 .DS_Store
