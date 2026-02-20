@@ -16,8 +16,18 @@ DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OPENAI_CODEX_BASE_URL = "https://api.openai.com/v1"
-ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
+ZAI_BASE_URL = "https://api.z.ai/api/paas/v4"
 OPENCODE_BASE_URL = "https://api.opencode.ai/v1"
+
+# Baseline pricing (per 1M tokens, USD). Updated from OpenRouter API when available.
+MODEL_PRICING: Dict[str, Dict[str, float]] = {
+    "anthropic/claude-sonnet-4.6": {"prompt": 3.0, "completion": 15.0},
+    "anthropic/claude-opus-4.6": {"prompt": 15.0, "completion": 75.0},
+    "openai/gpt-4.2": {"prompt": 2.5, "completion": 10.0},
+    "google/gemini-2.5-pro-preview": {"prompt": 1.25, "completion": 5.0},
+    "openai/gpt-4.1-mini": {"prompt": 0.15, "completion": 0.6},
+    "openai/gpt-4.1-turbo": {"prompt": 0.5, "completion": 2.0},
+}
 
 
 def normalize_reasoning_effort(value: str, default: str = "medium") -> str:
@@ -40,6 +50,40 @@ def add_usage(total: Dict[str, Any], usage: Dict[str, Any]) -> None:
 
 def _strip_provider_prefix(model: str) -> str:
     return model.split("/", 1)[1] if "/" in model else model
+
+
+def fetch_openrouter_pricing() -> Dict[str, Dict[str, float]]:
+    """Fetch current pricing from OpenRouter API and update MODEL_PRICING."""
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        log.debug("No OpenRouter API key, skipping pricing fetch")
+        return MODEL_PRICING.copy()
+
+    try:
+        import requests
+        url = f"{OPENROUTER_BASE_URL}/models"
+        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
+        if resp.status_code != 200:
+            log.warning(f"Failed to fetch OpenRouter pricing: HTTP {resp.status_code}")
+            return MODEL_PRICING.copy()
+
+        data = resp.json()
+        updated = 0
+        for model_data in data.get("data", []):
+            model_id = model_data.get("id", "")
+            pricing = model_data.get("pricing", {})
+            if model_id and isinstance(pricing, dict):
+                prompt_price = float(pricing.get("prompt", 0))
+                completion_price = float(pricing.get("completion", 0))
+                if prompt_price > 0 or completion_price > 0:
+                    MODEL_PRICING[model_id] = {"prompt": prompt_price, "completion": completion_price}
+                    updated += 1
+
+        log.info(f"Updated pricing for {updated} models from OpenRouter")
+    except Exception as e:
+        log.warning(f"Failed to fetch OpenRouter pricing: {e}")
+
+    return MODEL_PRICING.copy()
 
 
 class LLMClient:
