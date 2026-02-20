@@ -16,7 +16,7 @@ DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 OPENAI_CODEX_BASE_URL = "https://api.openai.com/v1"
-ZAI_BASE_URL = "https://api.z.ai/api/paas/v4"
+ZAI_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
 OPENCODE_BASE_URL = "https://api.opencode.ai/v1"
 
 
