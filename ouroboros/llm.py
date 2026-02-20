@@ -187,7 +187,7 @@ class LLMClient:
                 content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img['base64']}"}})
 
         messages = [{"role": "user", "content": content}]
-        response_msg, usage = self.chat(messages=messages, model=model, tools=None, reasoning_effort=reasoning_effort, max_tokens=max_tokens)
+        response_msg, usage = self.chat(messages=messages, model=model, tools=None, max_tokens=max_tokens)
         return response_msg.get("content") or "", usage
 
     def default_model(self) -> str:
