@@ -33,10 +33,9 @@ class TestLLMVisionQuery(unittest.TestCase):
 
             captured_messages = []
 
-            original_create = mock_client.chat.completions.create
             def capture_create(**kwargs):
                 captured_messages.append(kwargs.get("messages", [{}])[0])
-                return original_create(**kwargs)
+                return mock_response
 
             mock_client.chat.completions.create.side_effect = capture_create
 
@@ -76,10 +75,11 @@ class TestLLMVisionQuery(unittest.TestCase):
             mock_get_client.return_value = (mock_client, MagicMock())
 
             captured_messages = []
-            original_create = mock_client.chat.completions.create
+
             def capture_create(**kwargs):
                 captured_messages.append(kwargs.get("messages", [{}])[0])
-                return original_create(**kwargs)
+                return mock_response
+
             mock_client.chat.completions.create.side_effect = capture_create
 
             fake_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -113,10 +113,11 @@ class TestLLMVisionQuery(unittest.TestCase):
             mock_get_client.return_value = (mock_client, MagicMock())
 
             captured_messages = []
-            original_create = mock_client.chat.completions.create
+
             def capture_create(**kwargs):
                 captured_messages.append(kwargs.get("messages", [{}])[0])
-                return original_create(**kwargs)
+                return mock_response
+
             mock_client.chat.completions.create.side_effect = capture_create
 
             client.vision_query(
