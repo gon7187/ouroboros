@@ -24,17 +24,22 @@ def main():
     # Test simple request
     print("\nSending test request...")
     try:
-        response = client.create_chat_completion(
+        response = client.chat(
             model="gpt-5.3-codex",
             messages=[{"role": "user", "content": "Say 'Hello from Codex API!'"}],
             stream=True
         )
         
-        print(f"\nResponse status: {response.status_code}")
-        print(f"Headers: {dict(response.headers)}")
-        print("\nContent:")
-        for chunk in response.iter_content(chunk_size=100):
-            print(chunk.decode('utf-8', errors='ignore'), end='')
+        print(f"\nResponse type: {type(response)}")
+        
+        if hasattr(response, 'status_code'):
+            print(f"Response status: {response.status_code}")
+            print(f"Headers: {dict(response.headers)}")
+            print("\nContent:")
+            for chunk in response.iter_content(chunk_size=100):
+                print(chunk.decode('utf-8', errors='ignore'), end='')
+        else:
+            print(f"Response: {response}")
         
     except Exception as e:
         print(f"ERROR: {e}")
