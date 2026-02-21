@@ -13,7 +13,6 @@ This client handles the backend API format with:
 
 import json
 import logging
-import re
 from typing import Any, Dict, List, Optional
 
 import httpx
