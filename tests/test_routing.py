@@ -1,61 +1,31 @@
 #!/usr/bin/env python3
-"""Test multi-provider routing for LLM models."""
+"""Test LLM multi-provider routing logic."""
 
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '/home/test/.openclaw/workspace/ouroboros')
 
 from ouroboros.llm import LLMClient
 
+
 def test_routing():
     """Test that models route to correct providers."""
-    
-    # Initialize client (it will load providers from env)
     client = LLMClient()
     
-    # Test models and expected providers
-    # Note: openai and opencode providers won't load without keys
-    # They should fall back to the first available provider (zai)
-    test_cases = [
-        ("glm-4.7", "zai"),
-        ("glm-4.7-flash", "zai"),
-        ("glm-5", "zai"),
-        ("gpt-5.3-codex", "zai"),  # Fallback - openai not loaded
-        ("opencode/claude-opus-4-6", "zai"),  # Fallback - opencode not loaded
-    ]
+    # Test Z.ai models
+    assert client.get_provider_for_model("glm-4.7") == "zai", "glm-4.7 should route to zai"
+    assert client.get_provider_for_model("glm-4.7-flash") == "zai", "glm-4.7-flash should route to zai"
+    assert client.get_provider_for_model("glm-5") == "zai", "glm-5 should route to zai"
     
-    print("=== Multi-Provider Routing Test ===\n")
+    # Test OpenAI models (will fail gracefully if provider missing)
+    provider = client.get_provider_for_model("gpt-4")
+    assert provider in ["openai", "zai"], f"gpt-4 should route to openai or fall back to available provider, got {provider}"
     
-    passed = 0
-    failed = 0
+    # Test OpenCode models
+    provider = client.get_provider_for_model("opencode/claude-opus-4-6")
+    assert provider in ["opencode", "zai"], f"opencode models should route to opencode or fall back, got {provider}"
     
-    for model, expected_provider in test_cases:
-        try:
-            provider = client.get_provider_for_model(model)
-            if provider == expected_provider:
-                print(f"✅ {model:30s} → {provider:10s} (expected: {expected_provider})")
-                passed += 1
-            else:
-                print(f"❌ {model:30s} → {provider:10s} (expected: {expected_provider})")
-                failed += 1
-        except Exception as e:
-            print(f"❌ {model:30s} → ERROR: {e}")
-            failed += 1
-    
-    print(f"\n=== Results ===")
-    print(f"Passed: {passed}/{len(test_cases)}")
-    print(f"Failed: {failed}/{len(test_cases)}")
-    
-    # Test that providers are loaded
-    print(f"\n=== Loaded Providers ===")
-    for provider_id, provider in client._providers.items():
-        print(f"✅ {provider_id:10s} - {provider.__class__.__name__}")
-    
-    print(f"\n=== Summary ===")
-    print("Z.ai models route correctly ✅")
-    print("Other models fall back to Z.ai (expected without other keys) ✅")
-    
-    return failed == 0
+    print("✅ All routing tests passed!")
+
 
 if __name__ == "__main__":
-    success = test_routing()
-    sys.exit(0 if success else 1)
+    test_routing()
