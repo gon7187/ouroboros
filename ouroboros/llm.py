@@ -125,11 +125,29 @@ class LLMClient:
     - Loop orchestration (handled by loop.py)
     """
 
-    def __init__(self):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+        """
+        Initialize LLM client.
+
+        For production use: don't pass arguments, reads from env.
+        For testing: pass api_key and optionally base_url to override.
+        """
         self._providers: Dict[str, ProviderConfig] = {}
         self._clients: Dict[str, OpenAI] = {}
         self._active_provider: str = "openrouter"
-        self._load_providers()
+
+        if api_key:
+            # Testing mode: create a test provider
+            self._providers["test"] = ProviderConfig(
+                name="test",
+                api_key=api_key,
+                base_url=base_url,
+                requires_reasoning_effort=True,
+            )
+            self._active_provider = "test"
+        else:
+            # Production mode: load from environment
+            self._load_providers()
 
     def _load_providers(self) -> None:
         """Load provider configurations from environment."""
@@ -260,37 +278,52 @@ class LLMClient:
 
     def vision_query(
         self,
-        image_base64: str,
         prompt: str,
+        images: Optional[List[Dict[str, Any]]] = None,
         model: str = "glm/glm-4.7",
         max_tokens: int = 1024,
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Query a vision model with an image.
+        Query a vision model with images.
+
+        Args:
+            prompt: Text prompt
+            images: List of image dicts, each with either "url" or {"base64": ..., "mime": ...}
+            model: Model name
+            max_tokens: Max tokens to generate
 
         Returns: (text_response, usage_dict)
         """
         client, config = self._get_client(None)
 
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
-            ],
-        }]
+        # Build content with text and images
+        content = [{"type": "text", "text": prompt}]
+
+        if images:
+            for img in images:
+                if "url" in img:
+                    # URL format
+                    content.append({"type": "image_url", "image_url": {"url": img["url"]}})
+                elif "base64" in img:
+                    # Base64 format with MIME type
+                    mime = img.get("mime", "image/png")
+                    b64_data = img["base64"]
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64_data}"}
+                    })
 
         # Vision models don't support reasoning_effort
         response = client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
         )
 
-        content = response.choices[0].message.content or ""
+        text_response = response.choices[0].message.content or ""
         usage = self._extract_usage(response, model)
 
-        return content, usage
+        return text_response, usage
 
     # =====================================================================
     # Private Helpers
