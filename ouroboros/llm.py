@@ -16,6 +16,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openai import OpenAI
@@ -43,6 +44,28 @@ class ModelProfile:
     effort: str
     temperature: float = 0.0
     max_tokens: int = 4096
+
+
+# ---------------------------------------------------------------------------
+# Model-to-Provider Routing Registry
+# ---------------------------------------------------------------------------
+
+_MODEL_TO_PROVIDER: Dict[str, str] = {
+    # OpenCode models
+    "opencode/*": "opencode",
+    # OpenAI models (including Codex)
+    "gpt-*": "openai",
+    "gpt-*codex": "openai",
+    "claude-*": "openai",  # OpenAI-hosted Claude models
+    "o3*": "openai",       # OpenAI o3/o4 models
+    "o4*": "openai",       # OpenAI o4 models
+    "gemini-*": "openai",  # OpenAI-hosted Gemini
+    "x-ai/*": "openai",    # OpenRouter/OpenAI format
+    "qwen/*": "openai",    # OpenRouter/OpenAI format
+    "google/*": "openai",  # OpenRouter/OpenAI format
+    # Z.ai models
+    "glm-*": "zai",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +174,7 @@ class LLMClient:
 
     def _load_providers(self) -> None:
         """Load provider configurations from environment."""
-        # Z.ai only (primary and working provider)
+        # Z.ai
         zai_key = os.environ.get("ZAI_API_KEY", "")
         if zai_key:
             self._providers["zai"] = ProviderConfig(
@@ -161,7 +184,27 @@ class LLMClient:
                 requires_reasoning_effort=False,
             )
 
-        # Set active provider (always Z.ai if available)
+        # OpenCode
+        opencode_key = os.environ.get("OPCODE_API_KEY", "")
+        if opencode_key:
+            self._providers["opencode"] = ProviderConfig(
+                name="opencode",
+                api_key=opencode_key,
+                base_url=os.environ.get("OPCODE_BASE_URL", "https://api.opencode.ai/v1"),
+                requires_reasoning_effort=False,
+            )
+
+        # OpenAI (including Codex)
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
+        if openai_key:
+            self._providers["openai"] = ProviderConfig(
+                name="openai",
+                api_key=openai_key,
+                base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+                requires_reasoning_effort=True,
+            )
+
+        # Set active provider (Z.ai first, then any available)
         if "zai" in self._providers:
             self._active_provider = "zai"
         elif self._providers:
@@ -171,8 +214,26 @@ class LLMClient:
 
         log.info(f"Loaded {len(self._providers)} LLM provider(s), active: {self._active_provider}")
 
-    def _get_client(self, provider: Optional[str] = None) -> Tuple[OpenAI, ProviderConfig]:
+    def get_provider_for_model(self, model: str) -> str:
+        """Determine which provider should handle a given model."""
+        # Check pattern matching
+        for pattern, provider in _MODEL_TO_PROVIDER.items():
+            if fnmatch(model, pattern):
+                # Verify provider exists
+                if provider in self._providers:
+                    return provider
+                else:
+                    log.warning(f"Model {model} matches pattern {pattern} but provider {provider} not loaded")
+        
+        # Default to active provider
+        return self._active_provider
+
+    def _get_client(self, provider: Optional[str] = None, model: Optional[str] = None) -> Tuple[OpenAI, ProviderConfig]:
         """Get or create OpenAI client for a provider."""
+        # If model provided, determine provider dynamically
+        if model and not provider:
+            provider = self.get_provider_for_model(model)
+        
         provider = provider or self._active_provider
 
         if provider not in self._providers:
@@ -220,7 +281,7 @@ class LLMClient:
 
         Returns: (response_message, usage_dict)
         """
-        client, config = self._get_client(provider)
+        client, config = self._get_client(provider, model)
 
         effort = normalize_reasoning_effort(reasoning_effort)
         profile = self.model_profile("default")
@@ -252,6 +313,7 @@ class LLMClient:
         images: Optional[List[Dict[str, Any]]] = None,
         model: str = "glm-4.7",
         max_tokens: int = 1024,
+        provider: Optional[str] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """
         Query a vision model with images.
@@ -261,10 +323,11 @@ class LLMClient:
             images: List of image dicts, each with either "url" or {"base64": ..., "mime": ...}
             model: Model name
             max_tokens: Max tokens to generate
+            provider: Override provider (otherwise auto-detected from model)
 
         Returns: (text_response, usage_dict)
         """
-        client, config = self._get_client(None)
+        client, config = self._get_client(provider, model)
 
         # Build content with text and images
         content = [{"type": "text", "text": prompt}]
