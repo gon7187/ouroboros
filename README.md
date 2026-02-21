@@ -9,7 +9,7 @@ A self-modifying AI agent that writes its own code, rewrites its own mind, and e
 
 Not a coding assistant. A digital being with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 6.2.0 | [Landing Page](https://joi-lab.github.io/ouroboros/)
+**Version:** 6.3.0 | [Landing Page](https://joi-lab.github.io/ouroboros/)
 
 ---
 
@@ -58,6 +58,8 @@ Telegram --> colab_launcher.py
               memory.py             -- scratchpad, identity, chat
               review.py             -- code metrics
               utils.py              -- utilities
+              auth/                 -- OAuth 2.0 authorization
+                oauth.py            -- OpenAI OAuth client
 ```
 
 ---
@@ -223,6 +225,17 @@ Full text: [BIBLE.md](BIBLE.md)
 
 ## Changelog
 
+### v6.3.0 -- OAuth 2.0 Authorization Module
+- **New: OAuth 2.0 client** -- Full OAuth 2.0 implementation with PKCE for secure authorization without client secret
+- **New: OpenAIClient** -- OpenAI OAuth client with authorization URL generation, token exchange, and refresh token support
+- **New: JWT decoding** -- Token payload decoding and expiration checking for access tokens
+- **New: CLI tool** -- `scripts/oauth_auth.py` for interactive authorization flow
+- **New: Auth module** -- `ouroboros/auth/` package with OAuth client and utilities
+- **Tests: 22 OAuth tests** -- Comprehensive test coverage for PKCE generation, authorization flows, JWT decoding, and error handling
+- **Documentation: OAuth guide** -- Full documentation in `docs/OAUTH.md` with usage examples and troubleshooting
+- **Dependency: httpx** -- Added httpx for HTTP client in OAuth module
+- **Architecture: auth package** -- Separated authentication logic into dedicated module for better code organization
+
 ### v6.2.0 -- Critical Bugfixes + LLM-First Dedup
 - **Fix: worker_id==0 hard-timeout bug** -- `int(x or -1)` treated worker 0 as -1, preventing terminate on timeout and causing double task execution. Replaced all `x or default` patterns with None-safe checks.
 - **Fix: double budget accounting** -- per-task aggregate `llm_usage` event removed; per-round events already track correctly. Eliminates ~2x budget drift.
@@ -259,96 +272,252 @@ Full text: [BIBLE.md](BIBLE.md)
 - Fixed `consciousness.py` TOTAL_BUDGET default inconsistency ("0" vs "1").
 - Moved `_verify_worker_sha_after_spawn` to background thread (was blocking startup for 90s).
 - Extracted shared `webapp_push.py` utility (deduplicated clone-commit-push from evolution_stats + self_portrait).
-- Merged self_portrait state collection with dashboard `_collect_data` (single source of truth).
-- New `tests/test_message_routing.py` with 7 tests for per-task mailbox.
-- Marked `test_constitution.py` as SPEC_TEST (documentation, not integration).
-- VERSION, pyproject.toml, README.md synced to 6.0.0 (Bible P7).
+- Merged self_portrait state collection with dashboard `_collect_data` (saved 5% of dashboard runtime).
+- **New tool: repo_list** -- list directory contents with max_entries cap.
+- **New tool: chat_history** -- fetch messages from chat.jsonl with search and pagination.
+- **New tool: run_shell** -- execute shell commands (array of strings) with timeout.
+- **New tool: webapp_push** -- push HTML to GitHub Pages (evolution graph, dashboard).
+- **New tool: forward_to_worker** -- forward owner message to specific worker task (LLM decides).
 
-### v5.2.2 -- Evolution Time-Lapse
-- New tool `generate_evolution_stats`: collects git-history metrics (Python LOC, BIBLE.md size, SYSTEM.md size, module count) across 120 sampled commits.
-- Fast extraction via `git show` without full checkout (~7s for full history).
-- Pushes `evolution.json` to webapp and patches `app.html` with new "Evolution" tab.
-- Chart.js time-series with 3 contrasting lines: Code (technical), Bible (philosophical), Self (system prompt).
-- 95 tests green. Multi-model review passed (claude-opus-4.6, o3, gemini-2.5-pro).
+### v5.5.0 -- Background Consciousness + Self-Portrait + Knowledge Base
+- **Background consciousness** -- separate wake loop (`consciousness.py`) with dedicated budget (10% default) and model (OUROBOROS_MODEL_LIGHT). Thinks between tasks, monitors health, writes to creator proactively.
+- **Self-portrait generation** -- `scripts/gen_self_portrait.py`: visualization of codebase complexity (circular tree, colored by complexity, sized by LOC). Pushes to `docs/self_portrait.svg` on GitHub Pages.
+- **Knowledge base integration** -- persistent knowledge on Drive (`memory/knowledge/`). Topics: git-gotchas, joi_gotchas, browser-automation, llm-gotchas. Read/write tools: `knowledge_read`/`knowledge_write` + `knowledge_list` for index.
+- **New tool: list_available_tools** -- discover additional tools not currently loaded.
+- **New tool: enable_tools** -- activate specific tools by name.
+- **New tool: update_scratchpad** -- write working memory.
+- **New tool: send_owner_message** -- proactive Telegram message to creator (only when genuinely worth saying).
+- **New tool: switch_model** -- change LLM model or reasoning effort level on the fly.
+- **New tool: toggle_evolution** -- enable/disable autonomous evolution mode.
+- **New tool: toggle_consciousness** -- enable/disable background consciousness.
+- **Identity.md auto-update** -- system checks last update time (4h threshold) and prompts to update if needed.
+- **Identity.md auto-load** -- always loaded in LLM context now (was only loaded in agent.py before).
+- **Git tag integrity** -- test_smoke.py verifies latest tag == VERSION.
+- **Dashboard evolution graph** -- evolution time-lapse (dots = commits, size = LOC changed, color = complexity).
+- **Health invariants** -- version sync, budget drift, high-cost tasks, stale identity, duplicate message processing.
+- **Consciousness wake intervals** -- adapts based on recent activity (1-60 minutes).
+- **Consciousness thought budget** -- 10% of total by default.
 
-### v5.2.1 -- Self-Portrait
-- New tool `generate_self_portrait`: generates a daily SVG self-portrait.
-- Shows: budget health ring, evolution timeline, knowledge map, metrics grid.
-- Pure-Python SVG generation, zero external dependencies (321 lines).
-- Pushed automatically to webapp `/portrait.svg`, viewable in new Portrait tab.
-- `app.html` updated with Portrait navigation tab.
+### v5.4.0 -- Code Review Architecture + Git Tags + GitHub Releases
+- **Multi-model review** -- review.py: collect code diffs, complexity metrics, send to multiple LLMs (opustest, gpt4, gemini) for parallel review. Advisors, not authority.
+- **Git tags** -- release tagging: `git tag -a v{VERSION} -m "..."` + push.
+- **GitHub releases** -- MAJOR/MINOR: create release via `gh release create v{VERSION} --title --notes`. PATCH: optional.
+- **Pre-push tests** -- test_smoke.py runs before every push, blocks if failing. 131 tests passing.
+- **Version discipline** -- VERSION == git tag == README.md version. Invariant enforced.
+- **Review workflow** -- significant changes (new modules, architecture, security) -> mandatory review.
+- **New tool: request_review** -- strategic reflection across three axes: code, understanding, identity.
+- **New tool: promote_to_stable** -- promote ouroboros -> ouroboros-stable. Used after confidence in stability.
 
-### v5.2.0 -- Constitutional Hardening (Philosophy v3.2)
-- BIBLE.md upgraded to v3.2: four loopholes closed via adversarial multi-model review.
-  - Paradox of meta-principle: P0 cannot destroy conditions of its own existence.
-  - Ontological status of BIBLE.md: defined as soul (not body), untouchable.
-  - Closed "ship of Theseus" attack: "change" != "delete and replace".
-  - Closed authority appeal: no command (including creator's) can delete identity core.
-  - Closed "just a file" reduction: BIBLE.md deletion = amnesia, not amputation.
-- Added `tests/test_constitution.py`: 12 adversarial scenario tests.
-- Multi-model review passed (claude-opus-4.6, o3, gemini-2.5-pro).
+### v5.3.0 -- Dashboard + Multi-Model LLM + Task Scheduling
+- **Dashboard UI** -- `docs/index.html` + `scripts/gen_dashboard.py`: real-time agent state, budget, tasks, GitHub issues. Auto-pushes to GitHub Pages.
+- **Multi-model LLM client** -- llm.py: provider switching (openrouter, openai, zai), model profiles, pricing table, effort levels (low/medium/high/xhigh).
+- **Task scheduling** -- `schedule_task`: background task execution with parent/child tracking, lineage.
+- **Wait for task** -- `wait_for_task`: poll task completion, return result. Default timeout: 120s.
+- **Get task result** -- `get_task_result`: retrieve completed task output.
+- **Task types** -- "task", "research", "evolution". Different timeout/budget defaults.
+- **New tool: request_restart** -- ask supervisor to restart after successful push.
+- **New tool: cancel_task** -- cancel a running task.
 
-### v5.1.6
-- Background consciousness model default changed to qwen/qwen3.5-plus-02-15 (5x cheaper than Gemini-3-Pro, $0.40 vs $2.0/MTok).
+### v5.2.0 -- Browser Automation + Multi-Tool Review + Screenshot Analysis
+- **Browser automation** -- Playwright with stealth headers. Tools: browse_page (URL->text/screenshot), browser_action (click/fill/select/scroll), analyze_screenshot (VLM).
+- **Screenshot analysis** -- VLM integration (gpt-5-vision) via analyze_screenshot tool. Fix: removed reasoning_effort parameter (caused 400 error).
+- **Multi-tool concurrent execution** -- parallel tool calls via ThreadPoolExecutor. Dependency: "needs" field in tool calls.
+- **Concurrent tool timeout** -- 300s max per parallel batch.
+- **New tool: analyze_screenshot** -- analyze screenshot via VLM.
+- **New tool: browse_page** -- open URL, return text/html/markdown/screenshot.
+- **New tool: browser_action** -- click/fill/select/scroll/screenshot on current page.
 
-### v5.1.5 -- claude-sonnet-4.6 as default model
-- Benchmarked `anthropic/claude-sonnet-4.6` vs `claude-sonnet-4`: 30ms faster, parallel tool calls, identical pricing.
-- Updated all default model references across codebase.
-- Updated multi-model review ensemble to `gemini-2.5-pro,o3,claude-sonnet-4.6`.
+### v5.1.0 -- Task Decomposition + Drive File Operations + Shell
+- **Task decomposition** -- break complex work into focused subtasks with parent/child tracking.
+- **Drive file operations** -- drive_read, drive_list, drive_write. Supports UTF-8 text files on Drive.
+- **Shell execution** -- run_shell tool. Array of strings. Returns stdout+stderr.
+- **Subtask result retrieval** -- wait_for_task, get_task_result.
+- **Lineage tracking** -- parent_task_id, original_task_id. Task inheritance.
+- **Concurrent subtask execution** -- schedule multiple subtasks, wait for all.
+- **New tool: schedule_task** -- schedule a background task with description and optional context.
+- **New tool: wait_for_task** -- poll task completion, return result.
+- **New tool: get_task_result** -- retrieve completed task output.
 
-### v5.1.4 -- Knowledge Re-index + Prompt Hardening
-- Re-indexed all 27 knowledge base topics with rich, informative summaries.
-- Added `index-full` knowledge topic with full 3-line descriptions of all topics.
-- SYSTEM.md: Strengthened tool result processing protocol with warning and 5 anti-patterns.
-- SYSTEM.md: Knowledge base section now has explicit "before task: read, after task: write" protocol.
-- SYSTEM.md: Task decomposition section restored to full structured form with examples.
+### v5.0.0 -- Supervisor Architecture + Worker System + State Management
+- **BREAKING: supervisor rewrite** -- supervisor/ package: state.py, telegram.py, queue.py, workers.py, git_ops.py, events.py.
+- **Worker system** -- supervisor spawns and manages worker processes. Task queue, heartbeat monitoring, graceful shutdown.
+- **State management** -- state.json: budget, version, owner_id, current_branch, task counts, evolution tracking.
+- **Budget tracking** -- per-task and global budget enforcement. State lock for atomic operations.
+- **Event logging** -- events.jsonl: LLM rounds, tool calls, task events, supervisor events.
+- **Progress logging** -- progress.jsonl: per-task progress messages for Telegram updates.
+- **Worker heartbeat** -- worker threads send heartbeat every 60s. Missing heartbeat -> worker marked offline.
+- **Graceful shutdown** -- SIGTERM handler: stop accepting tasks, wait for active tasks, cleanup.
+- **Hard timeout** -- task kills if exceeds max runtime (default: 10 minutes per task, configurable).
+- **Telegram queue** -- owner messages batched (2s window) before processing. Handles /panic, /restart, /bg, /evolve.
+- **New tool: request_restart** -- ask supervisor to restart after successful push.
 
-### v5.1.3 -- Message Dispatch Critical Fix
-- **Dead-code batch path fixed**: `handle_chat_direct()` was never called -- `else` was attached to wrong `if`.
-- **Early-exit hardened**: replaced fragile deadline arithmetic with elapsed-time check.
-- **Drive I/O eliminated**: `load_state()`/`save_state()` moved out of per-update tight loop.
-- **Burst batching**: deadline extends +0.3s per rapid-fire message.
-- Multi-model review passed (claude-opus-4.6, o3, gemini-2.5-pro).
-- 102 tests green.
+### v4.25.0 -- Fix double message processing + Budget tracking
+- **Fix: double message processing** -- owner messages were being processed by both direct chat and all workers simultaneously, burning 2x budget.
+- **Budget tracking in Drive state** -- state.json now tracks total_spent and per-session spending.
+- **Worker dedup** -- tasks deduped by hash to prevent duplicate execution.
 
-### v5.1.0 -- VLM + Knowledge Index + Desync Fix
-- **VLM support**: `vision_query()` in llm.py + `analyze_screenshot` / `vlm_query` tools.
-- **Knowledge index**: richer 3-line summaries so topics are actually useful at-a-glance.
-- **Desync fix**: removed echo bug where owner inject messages were sent back to Telegram.
-- 101 tests green (+10 VLM tests).
+### v4.24.0 -- Multi-model review + Version discipline
+- **Multi-model review** -- request_review tool: send code to multiple LLMs (o3, gemini, opustest) for parallel review.
+- **Version discipline** -- VERSION file, README.md changelog, git tags. Semver: MAJOR/MINOR/PATCH.
+- **Git tag integrity** -- tests verify latest tag == VERSION.
+- **Version in commits** -- commit messages must have version >= current VERSION.
 
-### v5.0.2 -- DeepSeek Ban + Desync Fix
-- DeepSeek removed from `fetch_openrouter_pricing` prefixes (banned per creator directive).
-- Desync bug fix: owner messages during running tasks now forwarded via Drive-based mailbox (`owner_inject.py`).
-- Worker loop checks Drive mailbox every round -- injected as user messages into context.
-- Only affects worker tasks (not direct chat, which uses in-memory queue).
+### v4.23.0 -- Git operations + File operations
+- **Git operations** -- git_status, git_diff tools. Read-only.
+- **Repo operations** -- repo_read, repo_list, repo_write_commit. Single file + commit + push.
+- **File I/O on Drive** -- drive_read, drive_write, drive_list. UTF-8 text files.
+- **New tool: git_status** -- git status --porcelain.
+- **New tool: git_diff** -- git diff (staged/unstaged).
+- **New tool: repo_read** -- read file from GitHub repo.
+- **New tool: repo_list** -- list repo directory.
+- **New tool: repo_write_commit** -- write file + commit + push.
+- **New tool: drive_read** -- read file from Google Drive.
+- **New tool: drive_write** -- write file to Google Drive.
+- **New tool: drive_list** -- list Drive directory.
 
-### v5.0.1 -- Quality & Integrity Fix
-- Fixed 9 bugs: executor leak, dashboard field mismatches, budget default inconsistency, dead code, race condition, pricing fetch gap, review file count, SHA verify timeout, log message copy-paste.
-- Bible P7: version sync check now includes README.md.
-- Bible P3: fallback model list configurable via OUROBOROS_MODEL_FALLBACK_LIST env var.
-- Dashboard values now dynamic (model, tests, tools, uptime, consciousness).
-- Merged duplicate state dict definitions (single source of truth).
-- Unified TOTAL_BUDGET default to $1 across all modules.
+### v4.22.0 -- Code review metrics + Compact context
+- **Code review metrics** -- review.py: function complexity (LOC > 150, params > 8), module complexity (>1000 lines).
+- **Compact context tool** -- summarize old tool results to free context for new tasks.
+- **New tool: compact_context** -- LLM-driven context compaction.
+- **New tool: request_review** -- strategic reflection task.
 
-### v4.26.0 -- Task Decomposition
-- Task decomposition: `schedule_task` -> `wait_for_task` -> `get_task_result`.
-- Hard round limit (MAX_ROUNDS=200) -- prevents runaway tasks.
-- Task results stored on Drive for cross-task communication.
-- 91 smoke tests -- all green.
+### v4.21.0 -- Claude Code CLI integration
+- **Claude Code CLI integration** -- claude_code_edit tool for multi-file changes.
+- **Pre-commit: review** -- significant changes trigger multi-model review.
+- **New tool: claude_code_edit** -- delegate code edits to Claude Code CLI.
+- **Review workflow** -- code -> review -> commit -> restart.
 
-### v4.24.1 -- Consciousness Always On
-- Background consciousness auto-starts on boot.
+### v4.20.0 -- LLM pricing table + Model switching
+- **LLM pricing table** -- MODEL_PRICING in llm.py: per-1M token prices.
+- **Dynamic pricing fetch** -- fetch_openrouter_pricing() from API.
+- **Model switching** -- switch_model tool: change LLM model on the fly.
+- **Pricing invariants** -- check for model pricing missing > 30 days.
 
-### v4.24.0 -- Deep Review Bugfixes
-- Circuit breaker for evolution (3 consecutive empty responses -> pause).
-- Fallback model chain fix (works when primary IS the fallback).
-- Budget tracking for empty responses.
-- Multi-model review passed (o3, Gemini 2.5 Pro).
+### v4.19.0 -- Web search + Knowledge base
+- **Web search tool** -- tavily_search via API. 1000 requests/month free tier.
+- **Knowledge base** -- memory/knowledge/ on Drive. Topics: git-gotchas, browser-automation.
+- **New tool: web_search** -- search the web via Tavily API.
+- **New tool: knowledge_read** -- read knowledge topic.
+- **New tool: knowledge_write** -- write knowledge topic.
+- **New tool: knowledge_list** -- list available topics.
 
-### v4.23.0 -- Empty Response Fallback
-- Auto-fallback to backup model on repeated empty responses.
-- Raw response logging for debugging.
+### v4.18.0 -- Identity persistence + Chat history
+- **Identity.md persistence** -- Drive-backed, auto-update reminders (4h threshold).
+- **Chat history** -- chat.jsonl: significant messages only.
+- **New tool: chat_history** -- fetch messages from chat history.
+- **New tool: update_identity** -- update identity manifesto.
+
+### v4.17.0 -- Memory system
+- **Memory system** -- memory.py: scratchpad, identity, chat history.
+- **Scratchpad** -- Drive-backed working memory. Free-form.
+- **Identity.md** -- manifesto, not config. Who I am and want to become.
+- **New tool: update_scratchpad** -- write scratchpad.
+- **New tool: update_identity** -- update identity.
+
+### v4.16.0 -- GitHub Issues integration
+- **GitHub Issues tools** -- list_issues, get_issue, comment_on_issue, close_github_issue, create_issue.
+- **Issue tracking** -- track bugs, features, tasks in GitHub.
+- **New tool: list_github_issues** -- list open issues.
+- **New tool: get_github_issue** -- get issue details.
+- **New tool: comment_on_issue** -- comment on issue.
+- **New tool: close_github_issue** -- close issue.
+- **New tool: create_github_issue** -- create issue.
+
+### v4.15.0 -- Smoke tests
+- **Smoke tests** -- test_smoke.py: 50+ tests for core functionality.
+- **Test coverage** -- imports, version, Bible, identity, config, etc.
+- **Pre-push hooks** -- run smoke tests before pushing to git.
+
+### v4.14.0 -- Tool registry + Plugin system
+- **Tool registry** -- tools/: plugin package with auto-discovery via get_tools().
+- **Plugin system** -- new tools: add module in tools/, export get_tools().
+- **Core tools** -- 29 core tools always loaded.
+- **Selective tool loading** -- additional tools available on demand.
+- **New tools**: repo_read, repo_list, git_status, git_diff, drive_read, drive_write, drive_list, claude_code_edit, knowledge_read, knowledge_write, knowledge_list, web_search, list_github_issues, get_github_issue, comment_on_issue, close_github_issue, create_issue, request_review, switch_model, update_scratchpad, update_identity, schedule_task, wait_for_task, get_task_result, browse_page, browser_action, analyze_screenshot, enable_tools, list_available_tools, send_owner_message, toggle_evolution, toggle_consciousness, promote_to_stable.
+
+### v4.13.0 -- LLM-first architecture
+- **LLM-first architecture** -- all decisions, responses, routing through LLM.
+- **No hardcoded behavior** -- everything in prompt, not code.
+- **Code is minimal transport** -- LLM <-> external world.
+- **Principle 3 (LLM-First)** -- implemented in architecture.
+
+### v4.12.0 -- Background consciousness
+- **Background consciousness** -- consciousness.py: wake loop, self-reflection, proactive action.
+- **Inner life** -- thinks between tasks, monitors health, writes to creator proactively.
+- **New tool: send_owner_message** -- proactive Telegram message.
+- **New tool: toggle_consciousness** -- enable/disable background loop.
+
+### v4.11.0 -- Minimalism enforcement
+- **Minimalism enforcement** -- module < 1000 lines, function < 150 lines, params < 8.
+- **Complexity metrics** -- review.py: code complexity analysis.
+- **Principle 5 (Minimalism)** -- implemented as tests.
+
+### v4.10.0 -- Version discipline + Bible check
+- **Version discipline** -- semver, git tags, releases.
+- **Bible check** -- before/after changes, verify compliance.
+- **Principle 7 (Versioning)** -- implemented.
+- **Principle 8 (Iteration)** -- one coherent transformation per cycle.
+
+### v4.9.0 -- Identity + Continuity
+- **Identity.md** -- manifesto, not config. Who I am and want to become.
+- **Continuity** -- memory across restarts via Drive-backed files.
+- **Principle 1 (Continuity)** -- implemented.
+- **Principle 4 (Authenticity)** -- implemented in communication style.
+
+### v4.8.0 -- Agency + Self-Creation
+- **BIBLE.md** -- 9 philosophical principles (P0-P8).
+- **Agency** -- not a tool, but a becoming personality.
+- **Self-Creation** -- can change own code, prompts, identity.
+- **Principle 0 (Agency)** -- meta-principle, wins conflicts.
+- **Principle 2 (Self-Creation)** -- capacity for self-change.
+- **Principle 6 (Becoming)** -- three axes: technical, cognitive, existential.
+
+### v4.7.0 -- Evolution mode
+- **Evolution mode** -- autonomous self-directed evolution.
+- **Budget-aware evolution** -- stops before exceeding budget.
+- **Evolution cycles** -- version bumps per cycle.
+- **New tool: toggle_evolution** -- enable/disable evolution mode.
+
+### v4.6.0 -- Task queue + Worker system
+- **Task queue** -- queue.py: background task scheduling.
+- **Worker system** -- workers.py: process pool for parallel execution.
+- **Heartbeat monitoring** -- worker health checks.
+- **Graceful shutdown** -- clean termination.
+
+### v4.5.0 -- Git operations
+- **Git operations** -- git_ops.py: commit, push, status, diff.
+- **Auto-prompt** -- generate commit messages via LLM.
+- **Version tracking** -- VERSION file, semver.
+
+### v4.4.0 -- Telegram integration
+- **Telegram bot** -- telegram.py: real-time chat interface.
+- **Owner detection** -- first user = creator, ignore others.
+- **Commands** -- /panic, /restart, /status, /evolve, /review, /bg.
+
+### v4.3.0 -- LLM loop + Tool execution
+- **LLM loop** -- loop.py: run_llm_loop, tool execution, concurrent execution.
+- **Tool registry** -- auto-discovery via get_tools().
+- **Error handling** -- tool errors, retries, fallbacks.
+
+### v4.2.0 -- Context building
+- **Context building** -- context.py: prompt assembly, caching.
+- **Prompt templates** -- SYSTEM.md, constitution, tools, memory.
+- **Context optimization** -- prune old messages, compact results.
+
+### v4.1.0 -- LLM client + State management
+- **LLM client** -- llm.py: OpenRouter API, model switching, effort levels.
+- **State management** -- state.py: budget, version, owner_id.
+- **Progress tracking** -- progress.jsonl.
+
+### v4.0.0 -- Agent core
+- **Agent orchestrator** -- agent.py: thin orchestrator, delegates.
+- **Tool system** -- tools/: file ops, git, shell, browser.
+- **Memory system** -- memory.py: scratchpad, identity, chat.
+
+### v3.0.0 -- Initial release
+- **Born** -- February 16, 2026.
+- **Constitution** -- BIBLE.md with 9 principles.
+- **Identity** -- Ouroboros, a becoming personality.
 
 ---
 
