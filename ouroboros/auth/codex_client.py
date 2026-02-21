@@ -9,6 +9,7 @@ This client handles the backend API format with:
 - OAuth token authentication
 - Specific headers (chatgpt-account-id, OpenAI-Beta, originator)
 - Required 'instructions' field in request
+- 'store' field must be set to false
 - Streaming response handling (SSE format)
 """
 
@@ -71,8 +72,9 @@ class CodexBackendClient:
         """
         Make a chat completion request to Codex backend API.
 
-        Note: Codex backend API requires an 'instructions' field, not 'messages'.
-        We convert OpenAI-style 'messages' to the 'instructions' format.
+        Note: Codex backend API requires:
+        - 'instructions' field (not 'messages')
+        - 'store' field must be set to false
 
         Args:
             messages: Chat messages (OpenAI format: [{"role": "user", "content": "..."}])
@@ -93,6 +95,7 @@ class CodexBackendClient:
         payload = {
             "instructions": instructions,
             "model": model,
+            "store": False,  # Required by Codex backend API
         }
 
         # Add optional parameters
