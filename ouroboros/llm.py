@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
+# Default models
+DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
+
 # API endpoints
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
