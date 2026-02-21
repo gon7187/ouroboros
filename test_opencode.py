@@ -1,92 +1,83 @@
 #!/usr/bin/env python3
-"""Test OpenCode provider API connectivity and format"""
-
+"""
+Test OpenCode LLM provider with simple query.
+"""
+import requests
 import json
-import sys
 import os
+import sys
 
-# Add parent dir to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# OpenCode credentials
+OPENCODE_API_KEY = os.environ.get('OPENCODE_API_KEY', 'sk-kKxq8nwze33meTFd982shUdJ8sNdozU5aIP2F4RidtcDeGsAMVBiqXWFsklf0ZJO')
+OPENCODE_BASE_URL = os.environ.get('OPENCODE_BASE_URL', 'https://api.opencode.ai/v1')
 
-# API Key (from clawbot config)
-OPENCODE_API_KEY = "sk-kKxq8nwze33meTFd982shUdJ8sNdozU5aIP2F4RidtcDeGsAMVBiqXWFsklf0ZJO"
+print(f"Testing OpenCode API...")
+print(f"Base URL: {OPENCODE_BASE_URL}")
+print(f"API Key: {OPENCODE_API_KEY[:20]}...")
+print()
 
-# Try common base URLs for OpenAI-style APIs
-POSSIBLE_BASE_URLS = [
-    "https://api.opencode.ai/v1",
-    "https://api.opencode.com/v1", 
-    "https://opencode.ai/api/v1",
-    "https://opencode.com/api/v1",
-]
-
-# Headers
-HEADERS = {
-    "Authorization": f"Bearer {OPENCODE_API_KEY}",
-    "Content-Type": "application/json"
+# Try simple chat completion request
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {OPENCODE_API_KEY}'
 }
 
-def test_url(base_url, url_suffix="/chat/completions"):
-    """Test a single URL endpoint"""
+# Try with different model names (common patterns)
+models_to_test = [
+    'gpt-4',
+    'gpt-3.5-turbo',
+    'claude-3-sonnet',
+    'llama-3-70b',
+    'model'
+]
+
+payload = {
+    'messages': [
+        {'role': 'user', 'content': 'Hello! Please respond with "OpenCode test successful"'}
+    ],
+    'max_tokens': 50
+}
+
+for model in models_to_test:
+    print(f"Trying model: {model}")
+    
     try:
-        import urllib.request
-        import urllib.error
+        response = requests.post(
+            f"{OPENCODE_BASE_URL}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=10
+        )
         
-        full_url = base_url + url_suffix
+        print(f"  Status: {response.status_code}")
         
-        # Try a simple list models request first
-        list_url = base_url + "/models"
-        
-        req = urllib.request.Request(list_url, headers=HEADERS, method="GET")
-        
-        try:
-            with urllib.request.urlopen(req, timeout=5) as response:
-                print(f"✅ {list_url} - Status: {response.status}")
-                data = json.loads(response.read().decode())
-                print(f"   Response: {json.dumps(data, indent=2)[:200]}...")
-                return True
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                print(f"❌ {list_url} - Not found (404)")
-            elif e.code == 401:
-                print(f"❌ {list_url} - Unauthorized (401)")
-            else:
-                print(f"❌ {list_url} - Error: {e.code} {e.reason}")
-            return False
-        except Exception as e:
-            print(f"❌ {list_url} - {type(e).__name__}: {e}")
-            return False
+        if response.status_code == 200:
+            print(f"  ✅ SUCCESS!")
+            data = response.json()
+            print(f"  Response: {json.dumps(data, indent=2)[:500]}...")
+            sys.exit(0)  # Exit on first success
+        else:
+            print(f"  Response: {response.text[:200]}...")
             
     except Exception as e:
-        print(f"❌ Failed to test {base_url}: {e}")
-        return False
-
-def main():
-    print("=" * 60)
-    print("Testing OpenCode API - Endpoint Discovery")
-    print("=" * 60)
-    print(f"API Key: {OPENCODE_API_KEY[:20]}... (length: {len(OPENCODE_API_KEY)})")
+        print(f"  Error: {e}")
+    
     print()
-    
-    results = []
-    for base_url in POSSIBLE_BASE_URLS:
-        print(f"\nTesting: {base_url}")
-        result = test_url(base_url)
-        results.append((base_url, result))
-    
-    print("\n" + "=" * 60)
-    print("Summary:")
-    print("=" * 60)
-    for url, success in results:
-        status = "✅ WORKING" if success else "❌ FAILED"
-        print(f"{status}: {url}")
-    
-    # If any URL worked, return success
-    if any(success for _, success in results):
-        print("\n✅ Found working endpoint!")
-        return 0
-    else:
-        print("\n❌ No working endpoints found. OpenCode may use different API format.")
-        return 1
 
-if __name__ == "__main__":
-    sys.exit(main())
+print("All models failed. Trying to list available models...")
+
+# Try to list models
+try:
+    response = requests.get(
+        f"{OPENCODE_BASE_URL}/models",
+        headers=headers,
+        timeout=10
+    )
+    
+    print(f"Models endpoint status: {response.status_code}")
+    print(f"Response: {response.text[:500]}...")
+    
+except Exception as e:
+    print(f"Models endpoint error: {e}")
+
+print("\nOpenCode test completed.")
