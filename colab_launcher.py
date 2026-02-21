@@ -1,4 +1,9 @@
-OPENROUTER_API_KEY = get_secret("OPENROUTER_API_KEY", default="")
-OPENAI_API_KEY = get_secret("OPENAI_API_KEY", default="")
-ZAI_API_KEY = get_secret("ZAI_API_KEY", default="")
-TAVILY_API_KEY = get_secret("TAVILY_API_KEY", default="")
+"""Launcher wrapper for local/Colab runs.
+
+Runs colab_bootstrap_shim as __main__ so supervisor actually starts.
+"""
+
+import runpy
+
+runpy.run_module("colab_bootstrap_shim", run_name="__main__")
+

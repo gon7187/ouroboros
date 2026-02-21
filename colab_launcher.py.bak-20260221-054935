@@ -1,0 +1,8 @@
+"""Launcher wrapper for local/Colab runs.
+
+Delegates to colab_bootstrap_shim.py, which injects env and starts supervisor.
+This file intentionally stays tiny so run-zai.sh can always execute it.
+"""
+
+from colab_bootstrap_shim import *  # noqa: F401,F403
+

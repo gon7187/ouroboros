@@ -11,7 +11,7 @@ Date: 2026-02-21
 ### 1. Basic Routing (test_routing.py)
 - ✅ `glm-4.7` → routes to `zai` provider
 - ✅ `glm-4.7-flash` → routes to `zai` provider
-- ✅ `glm-5` → routes to `zai` provider
+- ✅ `glm-4.7` → routes to `zai` provider
 - ✅ Models with missing providers fall back to available providers
 
 ### 2. Provider Loading
@@ -37,7 +37,7 @@ _MODEL_TO_PROVIDER = {
 
 | Provider | Key Available | Status | Models |
 |----------|---------------|--------|--------|
-| **Z.ai** | ✅ Yes | ✅ Working | glm-4.7, glm-4.7-flash, glm-5 |
+| **Z.ai** | ✅ Yes | ✅ Working | glm-4.7, glm-4.7-flash, glm-4.7 |
 | **OpenCode** | ✅ Yes | ⚠️ Issues | API format incompatible |
 | **OpenAI Codex** | ✅ Yes | ⚠️ Untested | gpt-5.3-codex |
 | **OpenRouter** | ❌ No | ❌ Unavailable | Various |

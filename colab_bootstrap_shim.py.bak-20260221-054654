@@ -19,27 +19,19 @@ RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = RUNTIME_DIR / "state" / "state.json"
 STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-# Load state (backward-compatible with older/incomplete files)
-DEFAULT_STATE = {
-    "owner_id": None,
-    "budget": 50.0,
-    "version": "6.2.0",
-    "session_id": None,
-}
-
+# Load state
 if STATE_FILE.exists():
     with open(STATE_FILE) as f:
         state = json.load(f)
-    if not isinstance(state, dict):
-        state = {}
-    merged = dict(DEFAULT_STATE)
-    merged.update(state)
-    state = merged
 else:
-    state = dict(DEFAULT_STATE)
-
-with open(STATE_FILE, "w") as f:
-    json.dump(state, f)
+    state = {
+        "owner_id": None,
+        "budget": 50.0,
+        "version": "6.2.0",
+        "session_id": None,
+    }
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 # Inject secrets from Colab Secrets
 def inject_env(var_name, secret_name=None, default=None):

@@ -36,10 +36,13 @@ QUEUE_MAX_RETRIES: int = 1
 
 
 def init(drive_root: pathlib.Path, soft_timeout: int, hard_timeout: int) -> None:
-    global DRIVE_ROOT, SOFT_TIMEOUT_SEC, HARD_TIMEOUT_SEC
+    global DRIVE_ROOT, SOFT_TIMEOUT_SEC, HARD_TIMEOUT_SEC, QUEUE_SNAPSHOT_PATH
     DRIVE_ROOT = drive_root
     SOFT_TIMEOUT_SEC = soft_timeout
     HARD_TIMEOUT_SEC = hard_timeout
+    # queue.py imports QUEUE_SNAPSHOT_PATH by value; refresh after state.init(...)
+    from supervisor import state as _state_mod
+    QUEUE_SNAPSHOT_PATH = _state_mod.QUEUE_SNAPSHOT_PATH
 
 
 # ---------------------------------------------------------------------------

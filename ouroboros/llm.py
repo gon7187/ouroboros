@@ -98,12 +98,17 @@ _PRICING_STATIC: Dict[str, Tuple[float, float, float]] = {
 # Model Profiles
 # ---------------------------------------------------------------------------
 
+_DEFAULT_MODEL = os.environ.get("OUROBOROS_MODEL", "glm-4.7")
+_LIGHT_MODEL = os.environ.get("OUROBOROS_MODEL_LIGHT", "glm-4.7-flash")
+_CODE_MODEL = os.environ.get("OUROBOROS_MODEL_CODE", _DEFAULT_MODEL)
+_ANALYSIS_MODEL = os.environ.get("OUROBOROS_MODEL_ANALYSIS", _CODE_MODEL)
+
 _MODEL_PROFILES: Dict[str, ModelProfile] = {
-    "default": ModelProfile(model="glm-4.7", effort="medium", temperature=0.0),
-    "light": ModelProfile(model="glm-4.7-flash", effort="low", temperature=0.0),
-    "code_task": ModelProfile(model="glm-5", effort="medium", temperature=0.0),
-    "analysis": ModelProfile(model="glm-5", effort="high", temperature=0.0),
-    "consciousness": ModelProfile(model="glm-4.7-flash", effort="low", temperature=0.0),
+    "default": ModelProfile(model=_DEFAULT_MODEL, effort="medium", temperature=0.0),
+    "light": ModelProfile(model=_LIGHT_MODEL, effort="low", temperature=0.0),
+    "code_task": ModelProfile(model=_CODE_MODEL, effort="medium", temperature=0.0),
+    "analysis": ModelProfile(model=_ANALYSIS_MODEL, effort="high", temperature=0.0),
+    "consciousness": ModelProfile(model=_LIGHT_MODEL, effort="low", temperature=0.0),
 }
 
 
@@ -281,6 +286,11 @@ class LLMClient:
 
         Returns: (response_message, usage_dict)
         """
+        if str(model).strip().lower() == "glm-5":
+            fallback_model = os.environ.get("OUROBOROS_MODEL", "glm-4.7")
+            log.warning("Model glm-5 is disabled in this deployment; using %s", fallback_model)
+            model = fallback_model
+
         client, config = self._get_client(provider, model)
 
         effort = normalize_reasoning_effort(reasoning_effort)
@@ -363,17 +373,45 @@ class LLMClient:
     # =====================================================================
 
     def _format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Format tool schemas for OpenAI-style API."""
-        formatted = []
+        """Format tool schemas for OpenAI-style API.
+
+        Supports both legacy shape:
+          {"name": ..., "description": ..., "parameters": ...}
+        and already-formatted shape:
+          {"type": "function", "function": {...}}
+        """
+        formatted: List[Dict[str, Any]] = []
         for tool in tools:
-            formatted.append({
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool.get("description", ""),
-                    "parameters": tool.get("parameters", {}),
-                },
-            })
+            # Already in OpenAI tool format
+            if isinstance(tool, dict) and tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+                fn = tool.get("function") or {}
+                name = fn.get("name")
+                if not name:
+                    continue
+                formatted.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters", {}),
+                    },
+                })
+                continue
+
+            # Legacy registry schema shape
+            if isinstance(tool, dict):
+                name = tool.get("name")
+                if not name:
+                    continue
+                formatted.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("parameters", {}),
+                    },
+                })
+
         return formatted
 
     def _message_to_dict(self, msg: Any) -> Dict[str, Any]:

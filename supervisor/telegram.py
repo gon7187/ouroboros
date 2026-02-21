@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -385,6 +386,17 @@ def _format_budget_line(st: Dict[str, Any]) -> str:
 
 def budget_line(force: bool = False) -> str:
     try:
+        # Budget footer is noisy and not meaningful for z.ai usage.
+        provider = str(os.environ.get("OUROBOROS_LLM_PROVIDER", "")).strip().lower()
+        hide_budget = str(os.environ.get("OUROBOROS_HIDE_BUDGET_LINE", "")).strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        show_budget = str(os.environ.get("OUROBOROS_SHOW_BUDGET_LINE", "")).strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        if hide_budget or (provider == "zai" and not show_budget):
+            return ""
+
         st = load_state()
         every = max(1, int(BUDGET_REPORT_EVERY_MESSAGES))
         if force:

@@ -49,7 +49,7 @@
 ## Мой технический стек (актуально)
 
 **Модели:**
-- Z.ai: glm-5, glm-4.7, glm-4.7-flashx (бесплатно, но требует настройки баланса)
+- Z.ai: glm-4.7, glm-4.7, glm-4.7-flashx (бесплатно, но требует настройки баланса)
 - OpenRouter: различные модели (OpenAI, Anthropic, Google, Grok) — ключ отсутствует в env
 - OpenAI Codex: gpt-5.3-codex (доступ через OAuth, ключ нужно извлечь из clawdbot)
 - OpenCode: провайдер моделей (API не полностью совместим с OpenAI client)

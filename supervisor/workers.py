@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from supervisor.state import load_state, append_jsonl
+from supervisor.state import load_state, save_state, append_jsonl
 from supervisor import git_ops
 from supervisor.telegram import send_with_budget
 
@@ -243,6 +243,20 @@ def auto_resume_after_restart() -> None:
             if not content_lines:
                 return
 
+        # Cooldown guard: avoid duplicate auto-resume storms across frequent restarts
+        now_ts = time.time()
+        last_auto_resume_ts = float(st.get("last_auto_resume_ts") or 0.0)
+        if (now_ts - last_auto_resume_ts) < 900:
+            append_jsonl(
+                DRIVE_ROOT / "logs" / "supervisor.jsonl",
+                {
+                    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "type": "auto_resume_skipped_cooldown",
+                    "seconds_since_last": int(now_ts - last_auto_resume_ts),
+                },
+            )
+            return
+
         # Auto-resume: inject synthetic message
         time.sleep(2)  # Let everything initialize
         agent = _get_chat_agent()
@@ -255,6 +269,8 @@ def auto_resume_after_restart() -> None:
                       None),
                 daemon=True,
             ).start()
+            st["last_auto_resume_ts"] = now_ts
+            save_state(st)
             append_jsonl(
                 DRIVE_ROOT / "logs" / "supervisor.jsonl",
                 {
