@@ -8,6 +8,7 @@ OpenAI Codex uses a different API endpoint than the standard OpenAI API:
 This client handles the backend API format with:
 - OAuth token authentication
 - Specific headers (chatgpt-account-id, OpenAI-Beta, originator)
+- Required 'instructions' field in request
 - Streaming response handling (SSE format)
 """
 
@@ -70,8 +71,11 @@ class CodexBackendClient:
         """
         Make a chat completion request to Codex backend API.
 
+        Note: Codex backend API requires an 'instructions' field, not 'messages'.
+        We convert OpenAI-style 'messages' to the 'instructions' format.
+
         Args:
-            messages: Chat messages (OpenAI format)
+            messages: Chat messages (OpenAI format: [{"role": "user", "content": "..."}])
             model: Model name (default: gpt-5.3-codex)
             stream: Whether to stream response (not yet implemented)
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
@@ -81,9 +85,13 @@ class CodexBackendClient:
         """
         url = f"{self.base_url}{self.CODEX_ENDPOINT}"
 
+        # Convert OpenAI-style messages to instructions format
+        # Codex backend uses 'instructions' which is a single string
+        instructions = self._messages_to_instructions(messages)
+
         # Build request payload
         payload = {
-            "messages": messages,
+            "instructions": instructions,
             "model": model,
         }
 
@@ -97,6 +105,7 @@ class CodexBackendClient:
 
         log.debug(f"Codex backend request: {url}")
         log.debug(f"Payload keys: {list(payload.keys())}")
+        log.debug(f"Instructions preview: {instructions[:200]}...")
 
         try:
             response = self._client.post(url, json=payload)
@@ -117,6 +126,42 @@ class CodexBackendClient:
         except Exception as e:
             log.error(f"Codex backend error: {e}")
             raise
+
+    def _messages_to_instructions(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        Convert OpenAI-style messages to instructions string.
+
+        Codex backend API expects a single 'instructions' string, not 'messages'.
+
+        Args:
+            messages: OpenAI-style messages (role + content)
+
+        Returns:
+            Single instructions string
+        """
+        instructions_parts = []
+
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "system":
+                instructions_parts.append(f"System: {content}")
+            elif role == "user":
+                instructions_parts.append(f"User: {content}")
+            elif role == "assistant":
+                instructions_parts.append(f"Assistant: {content}")
+            elif role == "function" or role == "tool":
+                # Skip function/tool messages for now
+                continue
+            else:
+                # Unknown role, just include the content
+                instructions_parts.append(content)
+
+        # Join with newlines
+        instructions = "\n\n".join(instructions_parts)
+
+        return instructions
 
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """
