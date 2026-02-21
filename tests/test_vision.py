@@ -19,19 +19,32 @@ class TestLLMVisionQuery(unittest.TestCase):
 
         client = LLMClient(api_key="test-key")
 
-        captured_messages = []
+        # Mock the OpenAI client creation
+        with patch.object(client, '_get_client') as mock_get_client:
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "I see a test image."
+            mock_response.usage.prompt_tokens = 10
+            mock_response.usage.completion_tokens = 5
+            mock_response.usage.total_tokens = 15
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_get_client.return_value = (mock_client, MagicMock())
 
-        def mock_chat(messages, model, tools=None, reasoning_effort="low", max_tokens=1024, tool_choice="auto"):
-            captured_messages.extend(messages)
-            return {"content": "I see a test image."}, {"prompt_tokens": 10, "completion_tokens": 5}
+            captured_messages = []
 
-        client.chat = mock_chat
+            original_create = mock_client.chat.completions.create
+            def capture_create(**kwargs):
+                captured_messages.append(kwargs.get("messages", [{}])[0])
+                return original_create(**kwargs)
 
-        text, usage = client.vision_query(
-            prompt="What do you see?",
-            images=[{"url": "https://example.com/test.png"}],
-            model="anthropic/claude-sonnet-4.6",
-        )
+            mock_client.chat.completions.create.side_effect = capture_create
+
+            text, usage = client.vision_query(
+                prompt="What do you see?",
+                images=[{"url": "https://example.com/test.png"}],
+                model="anthropic/claude-sonnet-4.6",
+            )
 
         self.assertEqual(text, "I see a test image.")
         self.assertEqual(len(captured_messages), 1)
@@ -49,19 +62,31 @@ class TestLLMVisionQuery(unittest.TestCase):
         from ouroboros.llm import LLMClient
 
         client = LLMClient(api_key="test-key")
-        captured_messages = []
 
-        def mock_chat(messages, model, tools=None, reasoning_effort="low", max_tokens=1024, tool_choice="auto"):
-            captured_messages.extend(messages)
-            return {"content": "Base64 image description."}, {}
+        # Mock the OpenAI client creation
+        with patch.object(client, '_get_client') as mock_get_client:
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "Base64 image description."
+            mock_response.usage.prompt_tokens = 10
+            mock_response.usage.completion_tokens = 5
+            mock_response.usage.total_tokens = 15
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_get_client.return_value = (mock_client, MagicMock())
 
-        client.chat = mock_chat
+            captured_messages = []
+            original_create = mock_client.chat.completions.create
+            def capture_create(**kwargs):
+                captured_messages.append(kwargs.get("messages", [{}])[0])
+                return original_create(**kwargs)
+            mock_client.chat.completions.create.side_effect = capture_create
 
-        fake_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-        text, _ = client.vision_query(
-            prompt="Describe this.",
-            images=[{"base64": fake_b64, "mime": "image/png"}],
-        )
+            fake_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            text, _ = client.vision_query(
+                prompt="Describe this.",
+                images=[{"base64": fake_b64, "mime": "image/png"}],
+            )
 
         self.assertEqual(text, "Base64 image description.")
         content = captured_messages[0]["content"]
@@ -74,21 +99,33 @@ class TestLLMVisionQuery(unittest.TestCase):
         from ouroboros.llm import LLMClient
 
         client = LLMClient(api_key="test-key")
-        captured_messages = []
 
-        def mock_chat(messages, model, tools=None, reasoning_effort="low", max_tokens=1024, tool_choice="auto"):
-            captured_messages.extend(messages)
-            return {"content": "Two images."}, {}
+        # Mock the OpenAI client creation
+        with patch.object(client, '_get_client') as mock_get_client:
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "Two images."
+            mock_response.usage.prompt_tokens = 10
+            mock_response.usage.completion_tokens = 5
+            mock_response.usage.total_tokens = 15
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_get_client.return_value = (mock_client, MagicMock())
 
-        client.chat = mock_chat
+            captured_messages = []
+            original_create = mock_client.chat.completions.create
+            def capture_create(**kwargs):
+                captured_messages.append(kwargs.get("messages", [{}])[0])
+                return original_create(**kwargs)
+            mock_client.chat.completions.create.side_effect = capture_create
 
-        client.vision_query(
-            prompt="Compare these images.",
-            images=[
-                {"url": "https://example.com/img1.png"},
-                {"url": "https://example.com/img2.png"},
-            ],
-        )
+            client.vision_query(
+                prompt="Compare these images.",
+                images=[
+                    {"url": "https://example.com/img1.png"},
+                    {"url": "https://example.com/img2.png"},
+                ],
+            )
 
         content = captured_messages[0]["content"]
         self.assertEqual(len(content), 3)  # text + 2 images
@@ -99,12 +136,20 @@ class TestLLMVisionQuery(unittest.TestCase):
 
         client = LLMClient(api_key="test-key")
 
-        def mock_chat(messages, model, tools=None, reasoning_effort="low", max_tokens=1024, tool_choice="auto"):
-            return {"content": "Text only."}, {}
+        # Mock the OpenAI client creation
+        with patch.object(client, '_get_client') as mock_get_client:
+            mock_client = MagicMock()
+            mock_response = MagicMock()
+            mock_response.choices = [MagicMock()]
+            mock_response.choices[0].message.content = "Text only."
+            mock_response.usage.prompt_tokens = 10
+            mock_response.usage.completion_tokens = 5
+            mock_response.usage.total_tokens = 15
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_get_client.return_value = (mock_client, MagicMock())
 
-        client.chat = mock_chat
+            text, _ = client.vision_query(prompt="Hello", images=[])
 
-        text, _ = client.vision_query(prompt="Hello", images=[])
         self.assertEqual(text, "Text only.")
 
 
