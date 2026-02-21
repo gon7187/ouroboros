@@ -7,9 +7,10 @@ This script tests whether the Codex backend API is working with OAuth tokens.
 
 import sys
 import logging
+from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(__file__).parent.parent)
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ouroboros.auth.token_loader import load_openai_oauth_with_account_id
 from ouroboros.auth.codex_client import create_codex_client
