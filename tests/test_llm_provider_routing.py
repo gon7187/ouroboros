@@ -25,9 +25,26 @@ from ouroboros.llm import LLMClient, _MODEL_TO_PROVIDER
 class TestModelToProviderMapping(unittest.TestCase):
     """Test the _MODEL_TO_PROVIDER registry pattern matching."""
 
+    def setUp(self):
+        """Set up test environment with all providers loaded."""
+        # Create a mock environment with all provider keys
+        self.mock_env = {
+            "ZAI_API_KEY": "test-zai-key",
+            "OPCODE_API_KEY": "test-opencode-key",
+            "OPENAI_API_KEY": "test-openai-key",
+        }
+        # Save original env
+        self.original_env = os.environ.copy()
+
+    def tearDown(self):
+        """Restore original environment."""
+        os.environ.clear()
+        os.environ.update(self.original_env)
+
     def test_opencode_models_route_correctly(self):
         """OpenCode models should map to 'opencode' provider."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         opencode_models = [
             "opencode/claude-opus-4-6",
@@ -41,7 +58,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_openai_gpt_models_route_correctly(self):
         """OpenAI GPT models should map to 'openai' provider."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         openai_models = [
             "gpt-4.1",
@@ -56,7 +74,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_claude_models_route_to_openai(self):
         """Claude models should route to 'openai' provider (OpenAI-hosted)."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         claude_models = [
             "claude-opus-4.6",
@@ -70,7 +89,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_gemini_models_route_to_openai(self):
         """Gemini models should route to 'openai' provider (OpenAI-hosted)."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         gemini_models = [
             "gemini-2.5-pro-preview",
@@ -83,7 +103,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_zai_glm_models_route_correctly(self):
         """Z.ai GLM models should map to 'zai' provider."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         glm_models = [
             "glm-4.7",
@@ -98,7 +119,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_openai_o3_models_route_correctly(self):
         """OpenAI o3/o4 models should map to 'openai' provider."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         o_models = [
             "o3-mini",
@@ -112,7 +134,8 @@ class TestModelToProviderMapping(unittest.TestCase):
 
     def test_invalid_model_falls_back_to_active_provider(self):
         """Unknown/invalid models should fall back to active provider (no crash)."""
-        client = LLMClient()
+        with patch.dict(os.environ, self.mock_env, clear=True):
+            client = LLMClient()
         
         invalid_models = [
             "invalid-model-name",
