@@ -6,6 +6,7 @@ from various sources (auth.json, env vars, etc.) for use with
 different LLM providers.
 """
 
+import base64
 import json
 import logging
 import os
@@ -16,6 +17,67 @@ log = logging.getLogger(__name__)
 
 # Default path to auth.json
 DEFAULT_AUTH_PATH = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth.json"
+
+
+def decode_jwt_payload(token: str) -> Optional[Dict]:
+    """
+    Decode JWT payload without verification (for debugging/extracting claims).
+
+    Args:
+        token: JWT token string
+
+    Returns:
+        Decoded payload dict or None if decoding fails
+    """
+    try:
+        # JWT has 3 parts: header.payload.signature
+        parts = token.split(".")
+        if len(parts) != 3:
+            log.warning(f"Invalid JWT format")
+            return None
+
+        # Decode payload (base64url)
+        payload_b64 = parts[1]
+        # Add padding if needed
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+
+        payload_json = base64.urlsafe_b64decode(payload_b64)
+        payload = json.loads(payload_json)
+
+        return payload
+
+    except Exception as e:
+        log.error(f"Failed to decode JWT: {e}")
+        return None
+
+
+def extract_account_id_from_jwt(token: str) -> Optional[str]:
+    """
+    Extract ChatGPT account_id from JWT token.
+
+    The account_id is in: https://api.openai.com/auth -> chatgpt_account_id
+
+    Args:
+        token: JWT token string
+
+    Returns:
+        Account ID or None if not found
+    """
+    payload = decode_jwt_payload(token)
+    if not payload:
+        return None
+
+    # Try different paths
+    auth_info = payload.get("https://api.openai.com/auth", {})
+    account_id = auth_info.get("chatgpt_account_id")
+
+    if account_id:
+        return account_id
+
+    log.warning(f"Could not find chatgpt_account_id in JWT payload")
+    return None
 
 
 def load_openai_oauth_token(auth_path: Optional[Path] = None) -> Optional[str]:
@@ -83,29 +145,30 @@ def load_openai_oauth_with_account_id(auth_path: Optional[Path] = None) -> Optio
         with open(auth_path, "r") as f:
             auth_data = json.load(f)
 
+        token = None
+        account_id = None
+
         # Try different structures
         # Structure 1: {"openai_oauth": {"access": "...", "account_id": "..."}}
         if "openai_oauth" in auth_data:
             oauth_data = auth_data["openai_oauth"]
             token = oauth_data.get("access") or oauth_data.get("access_token")
             account_id = oauth_data.get("account_id")
-            if token and account_id:
-                return token, account_id
 
         # Structure 2: {"openai-codex": {"access": "...", "account_id": "..."}}
         if "openai-codex" in auth_data:
             oauth_data = auth_data["openai-codex"]
-            token = oauth_data.get("access") or oauth_data.get("access_token")
-            account_id = oauth_data.get("account_id")
-            if token and account_id:
-                return token, account_id
+            token = token or (oauth_data.get("access") or oauth_data.get("access_token"))
+            account_id = account_id or oauth_data.get("account_id")
 
-        # Fallback: just try to extract token, account_id will be extracted from JWT
-        token = load_openai_oauth_token(auth_path)
-        if token:
-            return token, None
+        # Fallback: extract from JWT
+        if token and not account_id:
+            account_id = extract_account_id_from_jwt(token)
 
-        log.warning(f"Could not find OpenAI OAuth token in auth.json")
+        if token and account_id:
+            return token, account_id
+
+        log.warning(f"Could not find OpenAI OAuth token with account_id in auth.json")
         return None
 
     except Exception as e:
