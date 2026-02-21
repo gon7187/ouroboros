@@ -1,220 +1,221 @@
 """
-Ouroboros — LLM client.
+Ouroboros — LLM client with multi-provider support.
 
-Supports provider routing for OpenRouter, OpenAI, z.ai, OpenCode, and OpenAI Codex.
-LLM calls tools directly, no hidden pipelines (Bible P3).
+Simplified to focus on LLM calls (chat, vision). Provider configuration
+and model selection are extracted into clear, testable components.
+
+Key principles:
+- LLM-first: the client just calls LLMs, doesn't hide complexity
+- Clear separation: provider config vs. LLM operations
+- Minimal state: configuration is set once, then used
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from openai import OpenAI
 
 log = logging.getLogger(__name__)
 
-# Default models
-DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
 
-# API endpoints
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENAI_BASE_URL = "https://api.openai.com/v1"
-OPENAI_CODEX_BASE_URL = "https://api.openai.com/v1"
-ZAI_BASE_URL = "https://api.z.ai/api/paas/v4"
-OPENCODE_BASE_URL = "https://api.opencode.ai/v1"
+# ---------------------------------------------------------------------------
+# Provider Configuration
+# ---------------------------------------------------------------------------
 
-# Baseline pricing (per 1M tokens, USD). Updated from OpenRouter API when available.
-MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    "anthropic/claude-sonnet-4.6": {"prompt": 3.0, "completion": 15.0},
-    "anthropic/claude-opus-4.6": {"prompt": 15.0, "completion": 75.0},
-    "openai/gpt-4.2": {"prompt": 2.5, "completion": 10.0},
-    "google/gemini-2.5-pro-preview": {"prompt": 1.25, "completion": 5.0},
-    "openai/gpt-4.1-mini": {"prompt": 0.15, "completion": 0.6},
-    "openai/gpt-4.1-turbo": {"prompt": 0.5, "completion": 2.0},
+@dataclass(frozen=True)
+class ProviderConfig:
+    """Configuration for a single LLM provider."""
+    name: str
+    api_key: str
+    base_url: Optional[str] = None
+    requires_reasoning_effort: bool = True
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    """Configuration for a task-specific model profile."""
+    model: str
+    effort: str
+    temperature: float = 0.0
+    max_tokens: int = 4096
+
+
+# ---------------------------------------------------------------------------
+# Pricing
+# ---------------------------------------------------------------------------
+
+_PRICING_STATIC: Dict[str, Tuple[float, float, float]] = {
+    "anthropic/claude-opus-4.6": (5.0, 0.5, 25.0),
+    "anthropic/claude-opus-4": (15.0, 1.5, 75.0),
+    "anthropic/claude-sonnet-4": (3.0, 0.30, 15.0),
+    "anthropic/claude-sonnet-4.6": (3.0, 0.30, 15.0),
+    "anthropic/claude-sonnet-4.5": (3.0, 0.30, 15.0),
+    "openai/o3": (2.0, 0.50, 8.0),
+    "openai/o3-pro": (20.0, 1.0, 80.0),
+    "openai/o4-mini": (1.10, 0.275, 4.40),
+    "openai/gpt-4.1": (2.0, 0.50, 8.0),
+    "openai/gpt-5.2": (1.75, 0.175, 14.0),
+    "openai/gpt-5.2-codex": (1.75, 0.175, 14.0),
+    "google/gemini-2.5-pro-preview": (1.25, 0.125, 10.0),
+    "google/gemini-3-pro-preview": (2.0, 0.20, 12.0),
+    "x-ai/grok-3-mini": (0.30, 0.03, 0.50),
+    "qwen/qwen3.5-plus-02-15": (0.40, 0.04, 2.40),
+    "glm/glm-5": (0.002, 0.002, 0.002),
+    "glm/glm-4.7": (0.001, 0.001, 0.001),
+    "glm/glm-4.7-flashx": (0.0004, 0.0004, 0.0004),
 }
 
 
-def normalize_reasoning_effort(value: str, default: str = "medium") -> str:
-    """Normalize reasoning effort to allowed values."""
-    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
-    v = str(value or "").strip().lower()
-    return v if v in allowed else default
+# ---------------------------------------------------------------------------
+# Model Profiles
+# ---------------------------------------------------------------------------
+
+_MODEL_PROFILES: Dict[str, ModelProfile] = {
+    "default": ModelProfile(model="glm/glm-4.7", effort="medium", temperature=0.0),
+    "light": ModelProfile(model="glm/glm-4.7-flashx", effort="low", temperature=0.0),
+    "code_task": ModelProfile(model="glm/glm-5", effort="medium", temperature=0.0),
+    "analysis": ModelProfile(model="glm/glm-5", effort="high", temperature=0.0),
+    "consciousness": ModelProfile(model="glm/glm-4.7-flashx", effort="low", temperature=0.0),
+}
 
 
-def reasoning_rank(value: str) -> int:
-    """Convert reasoning effort to numeric rank for comparison."""
-    order = {"none": 0, "minimal": 1, "low": 2, "medium": 3, "high": 4, "xhigh": 5}
-    return int(order.get(str(value or "").strip().lower(), 3))
+# ---------------------------------------------------------------------------
+# Utility Functions
+# ---------------------------------------------------------------------------
+
+def normalize_reasoning_effort(effort: str, default: str = "medium") -> str:
+    """Normalize reasoning effort to valid values."""
+    valid = {"low", "medium", "high", "xhigh"}
+    return effort if effort in valid else default
+
+
+def reasoning_rank(effort: str) -> int:
+    """Get numeric rank for reasoning effort (higher = more reasoning)."""
+    return {"low": 0, "medium": 1, "high": 2, "xhigh": 3}.get(effort, 1)
 
 
 def add_usage(total: Dict[str, Any], usage: Dict[str, Any]) -> None:
-    """Add usage metrics to total."""
-    for k in ("prompt_tokens", "completion_tokens", "total_tokens", "cached_tokens", "cache_write_tokens"):
-        total[k] = int(total.get(k) or 0) + int(usage.get(k) or 0)
-    if usage.get("cost"):
-        total["cost"] = float(total.get("cost") or 0) + float(usage["cost"])
+    """Add usage from one call to running total."""
+    for key in ("prompt_tokens", "completion_tokens", "cached_tokens", "total_tokens"):
+        total[key] = (total.get(key, 0) or 0) + (usage.get(key, 0) or 0)
 
 
-def _strip_provider_prefix(model: str) -> str:
-    """Remove provider prefix from model name."""
-    return model.split("/", 1)[1] if "/" in model else model
-
-
-class ProviderConfig:
-    """Encapsulates provider routing logic."""
-
-    def __init__(self):
-        self._env_keys = {
-            "openrouter": "OPENROUTER_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "openai-codex": "OPENAI_CODEX_KEY",
-            "zai": "ZAI_API_KEY",
-            "opencode": "OPENCODE_API_KEY",
-        }
-
-    def get_key(self, provider: str) -> str:
-        """Get API key for provider."""
-        return os.environ.get(self._env_keys[provider], "").strip()
-
-    def get_base_url(self, provider: str) -> str:
-        """Get base URL for provider."""
-        defaults = {
-            "openrouter": OPENROUTER_BASE_URL,
-            "openai": os.environ.get("OPENAI_BASE_URL", OPENAI_BASE_URL).strip(),
-            "openai-codex": os.environ.get("OPENAI_CODEX_BASE_URL", OPENAI_CODEX_BASE_URL).strip(),
-            "zai": os.environ.get("ZAI_BASE_URL", ZAI_BASE_URL).strip(),
-            "opencode": os.environ.get("OPENCODE_BASE_URL", OPENCODE_BASE_URL).strip(),
-        }
-        return defaults[provider]
-
-    def resolve_by_model_prefix(self, model: str) -> Optional[Tuple[str, str, str, str]]:
-        """Resolve provider by model prefix detection."""
-        ml = model.lower()
-
-        # Model prefix → provider mapping
-        prefix_map = {
-            ("anthropic/", "openai/", "google/", "meta-llama/", "x-ai/", "qwen/", "mistralai/", "deepseek/"): "openrouter",
-            ("zai/", "z-ai/", "glm-"): "zai",
-            ("opencode/", "open-code/"): "opencode",
-            ("openai-codex/", "codex/"): "openai-codex",
-            ("openai/", "gpt-", "o1", "o3", "o4"): "openai",
-        }
-
-        for prefixes, provider in prefix_map.items():
-            if any(ml.startswith(p) for p in prefixes):
-                key = self.get_key(provider)
-                if not key and provider == "openai-codex":
-                    # Fall back to openai key for codex
-                    key = self.get_key("openai")
-                    provider = "openai"
-                if key:
-                    base_url = self.get_base_url(provider)
-                    effective_model = _strip_provider_prefix(model) if "/" in model else model
-                    return provider, effective_model, key, base_url
-
-        return None
-
-    def resolve_by_preference(self, model: str) -> Optional[Tuple[str, str, str, str]]:
-        """Resolve provider by explicit environment preference."""
-        pref = os.environ.get("OUROBOROS_LLM_PROVIDER", "").strip().lower()
-
-        if not pref or pref == "auto":
-            return None
-
-        if pref in self._env_keys:
-            key = self.get_key(pref)
-            if not key:
-                raise ValueError(f"{self._env_keys[pref]} not set")
-
-            base_url = self.get_base_url(pref)
-            effective_model = model
-
-            # Strip prefix if needed
-            if pref in ("openai", "openai-codex", "zai", "opencode") and "/" in model:
-                effective_model = _strip_provider_prefix(model)
-
-            return pref, effective_model, key, base_url
-
-        return None
-
-    def resolve_fallback(self, model: str) -> Tuple[str, str, str, str]:
-        """Fallback to first available provider with a key."""
-        provider_order = ["openrouter", "openai", "zai", "opencode"]
-        ml = model.lower()
-
-        for provider in provider_order:
-            key = self.get_key(provider)
-            if key:
-                base_url = self.get_base_url(provider)
-                effective_model = model
-                if provider in ("openai", "zai", "opencode") and "/" in model:
-                    effective_model = _strip_provider_prefix(model)
-                return provider, effective_model, key, base_url
-
-        raise ValueError("No LLM API key configured")
-
-    def resolve(self, model: str) -> Tuple[str, str, str, str]:
-        """Resolve provider for a model. Returns (provider, effective_model, key, base_url)."""
-        m = (model or "").strip()
-        if not m:
-            raise ValueError("Model name cannot be empty")
-
-        # 1. Explicit preference
-        result = self.resolve_by_preference(m)
-        if result:
-            return result
-
-        # 2. Model prefix detection
-        result = self.resolve_by_model_prefix(m)
-        if result:
-            return result
-
-        # 3. Special models
-        ml = m.lower()
-        if ml == "gpt-5.3-codex":
-            key = self.get_key("openai-codex") or self.get_key("openai")
-            if not key:
-                raise ValueError("OPENAI_CODEX_KEY or OPENAI_API_KEY not set for gpt-5.3-codex")
-            return "openai", m, key, OPENAI_CODEX_BASE_URL
-
-        # 4. Fallback to first available
-        return self.resolve_fallback(m)
-
+# ---------------------------------------------------------------------------
+# LLM Client
+# ---------------------------------------------------------------------------
 
 class LLMClient:
-    """LLM client with multi-provider support."""
+    """
+    Simple LLM client for chat and vision queries.
 
-    def __init__(self, api_key: Optional[str] = None, base_url: str = OPENROUTER_BASE_URL):
-        self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url = base_url
-        self._clients: Dict[str, Any] = {}
-        self._provider_config = ProviderConfig()
+    Responsibilities:
+    - Manage provider configuration
+    - Select models based on task type
+    - Make chat and vision calls
+    - Format tool calls for LLM
 
-    def _get_client(self, provider: str, base_url: str, api_key: str):
-        """Get or create OpenAI client for provider."""
-        key = f"{provider}|{base_url}|{api_key[:10]}"
-        if key not in self._clients:
-            from openai import OpenAI
-            self._clients[key] = OpenAI(base_url=base_url, api_key=api_key)
-        return self._clients[key]
+    Not responsible for:
+    - Tool execution (handled by ToolRegistry)
+    - Context building (handled by context.py)
+    - Loop orchestration (handled by loop.py)
+    """
 
-    def _fetch_generation_cost(self, generation_id: str, api_key: str, base_url: str) -> Optional[float]:
-        """Fetch cost from OpenRouter for a generation."""
-        try:
-            import requests
-            url = f"{base_url.rstrip('/')}/generation?id={generation_id}"
-            for _ in range(2):
-                resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
-                if resp.status_code == 200:
-                    data = resp.json().get("data") or {}
-                    cost = data.get("total_cost") or data.get("usage", {}).get("cost")
-                    if cost is not None:
-                        return float(cost)
-                time.sleep(0.5)
-        except Exception:
-            log.debug("Failed to fetch generation cost", exc_info=True)
-        return None
+    def __init__(self):
+        self._providers: Dict[str, ProviderConfig] = {}
+        self._clients: Dict[str, OpenAI] = {}
+        self._active_provider: str = "openrouter"
+        self._load_providers()
+
+    def _load_providers(self) -> None:
+        """Load provider configurations from environment."""
+        # OpenRouter (primary)
+        or_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if or_key:
+            self._providers["openrouter"] = ProviderConfig(
+                name="openrouter",
+                api_key=or_key,
+                base_url="https://openrouter.ai/api/v1",
+                requires_reasoning_effort=True,
+            )
+
+        # Z.ai
+        zai_key = os.environ.get("ZAI_API_KEY", "")
+        if zai_key:
+            self._providers["zai"] = ProviderConfig(
+                name="zai",
+                api_key=zai_key,
+                base_url=os.environ.get("ZAI_BASE_URL", "https://api.z.ai/api/coding/paas/v4"),
+                requires_reasoning_effort=False,
+            )
+
+        # OpenAI Codex
+        codex_key = os.environ.get("OPENAI_CODEX_KEY", "")
+        if codex_key:
+            self._providers["codex"] = ProviderConfig(
+                name="codex",
+                api_key=codex_key,
+                base_url=os.environ.get("OPENAI_CODEX_BASE_URL"),
+                requires_reasoning_effort=True,
+            )
+
+        # OpenCode
+        oc_key = os.environ.get("OPENCODE_API_KEY", "")
+        if oc_key:
+            self._providers["opencode"] = ProviderConfig(
+                name="opencode",
+                api_key=oc_key,
+                base_url=os.environ.get("OPENCODE_BASE_URL"),
+                requires_reasoning_effort=False,
+            )
+
+        # Set active provider
+        if not self._providers:
+            log.warning("No LLM providers configured!")
+        elif "openrouter" in self._providers:
+            self._active_provider = "openrouter"
+        else:
+            self._active_provider = next(iter(self._providers.keys()))
+
+        log.info(f"Loaded {len(self._providers)} LLM provider(s), active: {self._active_provider}")
+
+    def _get_client(self, provider: Optional[str] = None) -> Tuple[OpenAI, ProviderConfig]:
+        """Get or create OpenAI client for a provider."""
+        provider = provider or self._active_provider
+
+        if provider not in self._providers:
+            raise ValueError(f"Unknown provider: {provider}")
+
+        if provider not in self._clients:
+            config = self._providers[provider]
+            self._clients[provider] = OpenAI(
+                api_key=config.api_key,
+                base_url=config.base_url,
+            )
+
+        return self._clients[provider], self._providers[provider]
+
+    def model_profile(self, profile_name: str) -> ModelProfile:
+        """Get model profile configuration."""
+        return _MODEL_PROFILES.get(profile_name, _MODEL_PROFILES["default"])
+
+    def select_task_profile(self, task_type: str) -> str:
+        """Select appropriate model profile based on task type."""
+        task_lower = task_type.lower()
+
+        # Explicit task-type -> profile mappings
+        if task_lower in ("analysis", "review"):
+            return "analysis"
+        if task_lower == "code":
+            return "code_task"
+        if task_lower == "consciousness":
+            return "consciousness"
+
+        return "default"
 
     def chat(
         self,
@@ -222,113 +223,141 @@ class LLMClient:
         model: str,
         tools: Optional[List[Dict[str, Any]]] = None,
         reasoning_effort: str = "medium",
-        max_tokens: int = 16384,
-        tool_choice: str = "auto",
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        provider: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Send chat completion request to LLM."""
-        provider, effective_model, api_key, base_url = self._provider_config.resolve(model)
-        client = self._get_client(provider, base_url, api_key)
+        """
+        Make a chat completion request to LLM.
+
+        Returns: (response_message, usage_dict)
+        """
+        client, config = self._get_client(provider)
+
         effort = normalize_reasoning_effort(reasoning_effort)
+        profile = self.model_profile("default")
 
-        kwargs: Dict[str, Any] = {"model": effective_model, "messages": messages, "max_tokens": max_tokens}
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature if temperature is not None else profile.temperature,
+            "max_tokens": max_tokens if max_tokens is not None else profile.max_tokens,
+        }
 
-        # OpenRouter-specific configuration
-        if provider == "openrouter":
-            extra_body: Dict[str, Any] = {"reasoning": {"effort": effort, "exclude": True}}
-            if effective_model.startswith("anthropic/"):
-                extra_body["provider"] = {"order": ["Anthropic"], "allow_fallbacks": False, "require_parameters": True}
-            kwargs["extra_body"] = extra_body
+        # Only add reasoning_effort if provider supports it
+        if config.requires_reasoning_effort and effort != "medium":
+            kwargs["reasoning_effort"] = {"type": effort}
 
-        # Tool configuration
         if tools:
-            tools_payload = [t for t in tools]
-            if provider == "openrouter" and tools_payload:
-                last_tool = {**tools_payload[-1]}
-                last_tool["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
-                tools_payload[-1] = last_tool
-            kwargs["tools"] = tools_payload
-            kwargs["tool_choice"] = tool_choice
+            kwargs["tools"] = self._format_tools(tools)
 
-        resp = client.chat.completions.create(**kwargs)
-        resp_dict = resp.model_dump()
-        usage = resp_dict.get("usage") or {}
-        choices = resp_dict.get("choices") or [{}]
-        msg = (choices[0] if choices else {}).get("message") or {}
+        response = client.chat.completions.create(**kwargs)
 
-        # Normalize usage fields
-        if not usage.get("cached_tokens"):
-            d = usage.get("prompt_tokens_details") or {}
-            if isinstance(d, dict) and d.get("cached_tokens"):
-                usage["cached_tokens"] = int(d["cached_tokens"])
+        msg = response.choices[0].message
+        usage = self._extract_usage(response, model)
 
-        if not usage.get("cache_write_tokens"):
-            d = usage.get("prompt_tokens_details") or {}
-            if isinstance(d, dict):
-                cw = d.get("cache_write_tokens") or d.get("cache_creation_tokens") or d.get("cache_creation_input_tokens")
-                if cw:
-                    usage["cache_write_tokens"] = int(cw)
-
-        # Fetch cost from OpenRouter
-        if provider == "openrouter" and not usage.get("cost"):
-            gen_id = resp_dict.get("id") or ""
-            if gen_id:
-                c = self._fetch_generation_cost(gen_id, api_key=api_key, base_url=base_url)
-                if c is not None:
-                    usage["cost"] = c
-
-        return msg, usage
+        return self._message_to_dict(msg), usage
 
     def vision_query(
         self,
+        image_base64: str,
         prompt: str,
-        images: List[Dict[str, Any]],
-        model: str = "anthropic/claude-sonnet-4.6",
+        model: str = "glm/glm-4.7",
         max_tokens: int = 1024,
-        reasoning_effort: str = "low",
     ) -> Tuple[str, Dict[str, Any]]:
-        """Send vision query with images."""
-        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
-        for img in images:
-            if "url" in img:
-                content.append({"type": "image_url", "image_url": {"url": img["url"]}})
-            elif "base64" in img:
-                mime = img.get("mime", "image/png")
-                content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img['base64']}"}})
+        """
+        Query a vision model with an image.
 
-        messages = [{"role": "user", "content": content}]
-        response_msg, usage = self.chat(messages=messages, model=model, tools=None, max_tokens=max_tokens)
-        return response_msg.get("content") or "", usage
+        Returns: (text_response, usage_dict)
+        """
+        client, config = self._get_client(None)
 
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}},
+            ],
+        }]
 
-def fetch_openrouter_pricing() -> Dict[str, Dict[str, float]]:
-    """Fetch current pricing from OpenRouter API and update MODEL_PRICING."""
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if not api_key:
-        log.debug("No OpenRouter API key, skipping pricing fetch")
-        return MODEL_PRICING.copy()
+        # Vision models don't support reasoning_effort
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
 
-    try:
-        import requests
-        url = f"{OPENROUTER_BASE_URL}/models"
-        resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
-        if resp.status_code != 200:
-            log.warning(f"Failed to fetch OpenRouter pricing: HTTP {resp.status_code}")
-            return MODEL_PRICING.copy()
+        content = response.choices[0].message.content or ""
+        usage = self._extract_usage(response, model)
 
-        data = resp.json()
-        updated = 0
-        for model_data in data.get("data", []):
-            model_id = model_data.get("id", "")
-            pricing = model_data.get("pricing", {})
-            if model_id and isinstance(pricing, dict):
-                prompt_price = float(pricing.get("prompt", 0))
-                completion_price = float(pricing.get("completion", 0))
-                if prompt_price > 0 or completion_price > 0:
-                    MODEL_PRICING[model_id] = {"prompt": prompt_price, "completion": completion_price}
-                    updated += 1
+        return content, usage
 
-        log.info(f"Updated pricing for {updated} models from OpenRouter")
-    except Exception as e:
-        log.warning(f"Failed to fetch OpenRouter pricing: {e}")
+    # =====================================================================
+    # Private Helpers
+    # =====================================================================
 
-    return MODEL_PRICING.copy()
+    def _format_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Format tool schemas for OpenAI-style API."""
+        formatted = []
+        for tool in tools:
+            formatted.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("parameters", {}),
+                },
+            })
+        return formatted
+
+    def _message_to_dict(self, msg: Any) -> Dict[str, Any]:
+        """Convert OpenAI message object to dict."""
+        result = {"content": msg.content}
+
+        if hasattr(msg, "tool_calls") and msg.tool_calls:
+            result["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": tc.type,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+
+        return result
+
+    def _extract_usage(self, response: Any, model: str) -> Dict[str, Any]:
+        """Extract usage information from API response."""
+        if not hasattr(response, "usage"):
+            return {}
+
+        usage_obj = response.usage
+        if usage_obj is None:
+            return {}
+
+        result = {
+            "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0),
+            "completion_tokens": getattr(usage_obj, "completion_tokens", 0),
+            "total_tokens": getattr(usage_obj, "total_tokens", 0),
+        }
+
+        # Handle cached tokens (different providers use different fields)
+        for attr in ("cache_read_tokens", "cache_write_tokens", "cached_tokens", "cache_creation_tokens"):
+            val = getattr(usage_obj, attr, None)
+            if val:
+                result["cached_tokens"] = (result.get("cached_tokens", 0) or 0) + val
+                break
+
+        # Add pricing info
+        pricing = _PRICING_STATIC.get(model)
+        if pricing:
+            prompt_price, completion_price, _ = pricing
+            result["estimated_cost_usd"] = (
+                (result["prompt_tokens"] / 1_000_000) * prompt_price +
+                (result["completion_tokens"] / 1_000_000) * completion_price
+            )
+
+        return result
