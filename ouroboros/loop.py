@@ -64,6 +64,11 @@ def run_llm_loop(
     incoming_messages: queue.Queue,
     task_type: str = "",
     task_id: str = "",
+    budget_remaining_usd: Optional[float] = None,
+    event_queue: Optional[Any] = None,
+    initial_effort: str = "medium",
+    drive_root: Optional[pathlib.Path] = None,
+    **_compat_kwargs: Any,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """
     Core LLM-with-tools loop.
@@ -75,8 +80,8 @@ def run_llm_loop(
     """
     profile_name = llm.select_task_profile(task_type)
     profile_cfg = llm.model_profile(profile_name)
-    active_model = profile_cfg["model"]
-    active_effort = profile_cfg["effort"]
+    active_model = profile_cfg.model
+    active_effort = initial_effort or profile_cfg.effort
 
     llm_trace: Dict[str, Any] = {"assistant_notes": [], "tool_calls": []}
     accumulated_usage: Dict[str, Any] = {}
@@ -94,9 +99,9 @@ def run_llm_loop(
     def _switch_to_code_profile() -> None:
         nonlocal active_model, active_effort
         code_cfg = llm.model_profile("code_task")
-        if code_cfg["model"] != active_model or reasoning_rank(code_cfg["effort"]) > reasoning_rank(active_effort):
-            active_model = code_cfg["model"]
-            active_effort = max(active_effort, code_cfg["effort"], key=reasoning_rank)
+        if code_cfg.model != active_model or reasoning_rank(code_cfg.effort) > reasoning_rank(active_effort):
+            active_model = code_cfg.model
+            active_effort = max(active_effort, code_cfg.effort, key=reasoning_rank)
 
     round_idx = 0
     while True:
