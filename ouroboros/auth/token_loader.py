@@ -39,15 +39,19 @@ def load_openai_oauth_token(auth_path: Optional[Path] = None) -> Optional[str]:
             auth_data = json.load(f)
 
         # Try different structures
-        # Structure 1: {"openai_oauth": {"access_token": "..."}}
+        # Structure 1: {"openai_oauth": {"access": "..."}}
         if "openai_oauth" in auth_data:
-            return auth_data["openai_oauth"].get("access_token")
+            return auth_data["openai_oauth"].get("access") or auth_data["openai_oauth"].get("access_token")
 
-        # Structure 2: {"openai-codex": {"access_token": "..."}}
+        # Structure 2: {"openai-codex": {"access": "..."}}
         if "openai-codex" in auth_data:
-            return auth_data["openai-codex"].get("access_token")
+            return auth_data["openai-codex"].get("access") or auth_data["openai-codex"].get("access_token")
 
-        # Structure 3: Flat {"access_token": "..."}
+        # Structure 3: Flat {"access": "..."}
+        if "access" in auth_data:
+            return auth_data["access"]
+
+        # Structure 4: Flat {"access_token": "..."}
         if "access_token" in auth_data:
             return auth_data["access_token"]
 
@@ -80,18 +84,18 @@ def load_openai_oauth_with_account_id(auth_path: Optional[Path] = None) -> Optio
             auth_data = json.load(f)
 
         # Try different structures
-        # Structure 1: {"openai_oauth": {"access_token": "...", "account_id": "..."}}
+        # Structure 1: {"openai_oauth": {"access": "...", "account_id": "..."}}
         if "openai_oauth" in auth_data:
             oauth_data = auth_data["openai_oauth"]
-            token = oauth_data.get("access_token")
+            token = oauth_data.get("access") or oauth_data.get("access_token")
             account_id = oauth_data.get("account_id")
             if token and account_id:
                 return token, account_id
 
-        # Structure 2: {"openai-codex": {"access_token": "...", "account_id": "..."}}
+        # Structure 2: {"openai-codex": {"access": "...", "account_id": "..."}}
         if "openai-codex" in auth_data:
             oauth_data = auth_data["openai-codex"]
-            token = oauth_data.get("access_token")
+            token = oauth_data.get("access") or oauth_data.get("access_token")
             account_id = oauth_data.get("account_id")
             if token and account_id:
                 return token, account_id
@@ -180,7 +184,9 @@ def load_all_tokens(auth_path: Optional[Path] = None) -> Dict[str, str]:
         for key, value in auth_data.items():
             if isinstance(value, dict):
                 # Try to extract common fields
-                if "access_token" in value:
+                if "access" in value:
+                    tokens[f"{key}.access"] = value["access"]
+                elif "access_token" in value:
                     tokens[f"{key}.access_token"] = value["access_token"]
                 elif "key" in value:
                     tokens[f"{key}.key"] = value["key"]
