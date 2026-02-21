@@ -1,151 +1,195 @@
 """
 Token loader for OAuth and API keys from auth.json.
 
-Loads authentication tokens from ~/.openclaw/agents/main/agent/auth.json
+This module provides functions to load authentication tokens
+from various sources (auth.json, env vars, etc.) for use with
+different LLM providers.
 """
 
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-
+# Default path to auth.json
 DEFAULT_AUTH_PATH = Path.home() / ".openclaw" / "agents" / "main" / "agent" / "auth.json"
 
 
-def load_oauth_tokens(auth_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_openai_oauth_token(auth_path: Optional[Path] = None) -> Optional[str]:
     """
-    Load OAuth tokens from auth.json file.
+    Load OpenAI OAuth access token from auth.json.
 
     Args:
-        auth_path: Path to auth.json file (default: ~/.openclaw/agents/main/agent/auth.json)
+        auth_path: Path to auth.json (default: ~/.openclaw/agents/main/agent/auth.json)
 
     Returns:
-        Dict with provider names as keys and token data as values
+        OAuth access token or None if not found
     """
     auth_path = auth_path or DEFAULT_AUTH_PATH
 
     if not auth_path.exists():
-        log.warning(f"Auth file not found: {auth_path}")
-        return {}
+        log.debug(f"Auth file not found: {auth_path}")
+        return None
 
     try:
         with open(auth_path, "r") as f:
-            data = json.load(f)
+            auth_data = json.load(f)
 
-        # Extract only OAuth entries
-        oauth_entries = {}
-        for provider, auth_data in data.items():
-            if isinstance(auth_data, dict) and auth_data.get("type") == "oauth":
-                oauth_entries[provider] = auth_data
+        # Try different structures
+        # Structure 1: {"openai_oauth": {"access_token": "..."}}
+        if "openai_oauth" in auth_data:
+            return auth_data["openai_oauth"].get("access_token")
 
-        log.info(f"Loaded {len(oauth_entries)} OAuth entries from {auth_path}")
-        return oauth_entries
+        # Structure 2: {"openai-codex": {"access_token": "..."}}
+        if "openai-codex" in auth_data:
+            return auth_data["openai-codex"].get("access_token")
+
+        # Structure 3: Flat {"access_token": "..."}
+        if "access_token" in auth_data:
+            return auth_data["access_token"]
+
+        log.warning(f"Could not find access_token in auth.json")
+        return None
 
     except Exception as e:
-        log.error(f"Failed to load auth file: {e}")
-        return {}
+        log.error(f"Failed to load OpenAI OAuth token: {e}")
+        return None
 
 
-def get_codex_token(auth_path: Optional[Path] = None) -> Optional[str]:
+def load_openai_oauth_with_account_id(auth_path: Optional[Path] = None) -> Optional[Tuple[str, str]]:
     """
-    Get Codex OAuth access token from auth.json.
+    Load OpenAI OAuth access token and account_id from auth.json.
 
     Args:
-        auth_path: Path to auth.json file
+        auth_path: Path to auth.json (default: ~/.openclaw/agents/main/agent/auth.json)
 
     Returns:
-        Access token string, or None if not found
-    """
-    oauth_entries = load_oauth_tokens(auth_path)
-
-    codex_entry = oauth_entries.get("openai-codex")
-    if not codex_entry:
-        return None
-
-    return codex_entry.get("access")
-
-
-def get_codex_account_id(auth_path: Optional[Path] = None) -> Optional[str]:
-    """
-    Get Codex account ID from JWT token.
-
-    Args:
-        auth_path: Path to auth.json file
-
-    Returns:
-        Account ID string, or None if not found
-    """
-    oauth_entries = load_oauth_tokens(auth_path)
-
-    codex_entry = oauth_entries.get("openai-codex")
-    if not codex_entry:
-        return None
-
-    # Try to extract from JWT
-    access_token = codex_entry.get("access")
-    if not access_token:
-        return None
-
-    try:
-        import base64
-
-        # Decode JWT (without signature verification)
-        parts = access_token.split(".")
-        if len(parts) != 3:
-            return None
-
-        payload = parts[1]
-        payload += "=" * ((4 - len(payload) % 4) % 4)
-
-        decoded = base64.urlsafe_b64decode(payload)
-        jwt_data = json.loads(decoded)
-
-        # Try different account ID fields
-        return (
-            jwt_data.get("https://api.openai.com/auth", {}).get("chatgpt_account_id") or
-            jwt_data.get("chatgpt_account_id") or
-            jwt_data.get("https://api.openai.com/auth", {}).get("user_id") or
-            jwt_data.get("sub")
-        )
-
-    except Exception as e:
-        log.debug(f"Failed to extract account_id from JWT: {e}")
-        return None
-
-
-def load_api_keys(auth_path: Optional[Path] = None) -> Dict[str, str]:
-    """
-    Load API keys from auth.json file.
-
-    Args:
-        auth_path: Path to auth.json file
-
-    Returns:
-        Dict with provider names as keys and API keys as values
+        Tuple of (access_token, account_id) or None if not found
     """
     auth_path = auth_path or DEFAULT_AUTH_PATH
 
     if not auth_path.exists():
-        log.warning(f"Auth file not found: {auth_path}")
-        return {}
+        log.debug(f"Auth file not found: {auth_path}")
+        return None
 
     try:
         with open(auth_path, "r") as f:
-            data = json.load(f)
+            auth_data = json.load(f)
 
-        # Extract only API key entries
-        api_key_entries = {}
-        for provider, auth_data in data.items():
-            if isinstance(auth_data, dict) and auth_data.get("type") == "api_key":
-                api_key_entries[provider] = auth_data.get("key")
+        # Try different structures
+        # Structure 1: {"openai_oauth": {"access_token": "...", "account_id": "..."}}
+        if "openai_oauth" in auth_data:
+            oauth_data = auth_data["openai_oauth"]
+            token = oauth_data.get("access_token")
+            account_id = oauth_data.get("account_id")
+            if token and account_id:
+                return token, account_id
 
-        log.info(f"Loaded {len(api_key_entries)} API keys from {auth_path}")
-        return api_key_entries
+        # Structure 2: {"openai-codex": {"access_token": "...", "account_id": "..."}}
+        if "openai-codex" in auth_data:
+            oauth_data = auth_data["openai-codex"]
+            token = oauth_data.get("access_token")
+            account_id = oauth_data.get("account_id")
+            if token and account_id:
+                return token, account_id
+
+        # Fallback: just try to extract token, account_id will be extracted from JWT
+        token = load_openai_oauth_token(auth_path)
+        if token:
+            return token, None
+
+        log.warning(f"Could not find OpenAI OAuth token in auth.json")
+        return None
 
     except Exception as e:
-        log.error(f"Failed to load auth file: {e}")
-        return {}
+        log.error(f"Failed to load OpenAI OAuth token with account_id: {e}")
+        return None
+
+
+def load_api_key(provider: str, auth_path: Optional[Path] = None) -> Optional[str]:
+    """
+    Load API key for a provider from auth.json.
+
+    Args:
+        provider: Provider name (e.g., "zai", "opencode", "openrouter")
+        auth_path: Path to auth.json (default: ~/.openclaw/agents/main/agent/auth.json)
+
+    Returns:
+        API key or None if not found
+    """
+    auth_path = auth_path or DEFAULT_AUTH_PATH
+
+    # First check env var
+    env_key = f"{provider.upper()}_API_KEY"
+    env_value = os.getenv(env_key)
+    if env_value:
+        log.debug(f"Found {env_key} in environment")
+        return env_value
+
+    if not auth_path.exists():
+        log.debug(f"Auth file not found: {auth_path}")
+        return None
+
+    try:
+        with open(auth_path, "r") as f:
+            auth_data = json.load(f)
+
+        # Try to find the provider
+        if provider in auth_data:
+            provider_data = auth_data[provider]
+            if isinstance(provider_data, dict):
+                return provider_data.get("key")
+            else:
+                # Might be a raw string
+                return str(provider_data)
+
+        log.debug(f"Could not find API key for provider '{provider}' in auth.json")
+        return None
+
+    except Exception as e:
+        log.error(f"Failed to load API key for '{provider}': {e}")
+        return None
+
+
+def load_all_tokens(auth_path: Optional[Path] = None) -> Dict[str, str]:
+    """
+    Load all available tokens from auth.json.
+
+    This is useful for debugging and token discovery.
+
+    Args:
+        auth_path: Path to auth.json (default: ~/.openclaw/agents/main/agent/auth.json)
+
+    Returns:
+        Dict mapping provider/identifier to token
+    """
+    auth_path = auth_path or DEFAULT_AUTH_PATH
+    tokens = {}
+
+    if not auth_path.exists():
+        log.debug(f"Auth file not found: {auth_path}")
+        return tokens
+
+    try:
+        with open(auth_path, "r") as f:
+            auth_data = json.load(f)
+
+        for key, value in auth_data.items():
+            if isinstance(value, dict):
+                # Try to extract common fields
+                if "access_token" in value:
+                    tokens[f"{key}.access_token"] = value["access_token"]
+                elif "key" in value:
+                    tokens[f"{key}.key"] = value["key"]
+                elif "token" in value:
+                    tokens[f"{key}.token"] = value["token"]
+            else:
+                tokens[key] = str(value)
+
+    except Exception as e:
+        log.error(f"Failed to load all tokens: {e}")
+
+    return tokens
