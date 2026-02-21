@@ -10,6 +10,7 @@ This client handles the backend API format with:
 - Specific headers (chatgpt-account-id, OpenAI-Beta, originator)
 - Required 'instructions' field in request
 - 'store' field must be set to false
+- 'stream' field must be set to true (SSE format)
 - Streaming response handling (SSE format)
 """
 
@@ -66,7 +67,7 @@ class CodexBackendClient:
         self,
         messages: List[Dict[str, Any]],
         model: str = "gpt-5.3-codex",
-        stream: bool = False,
+        stream: bool = True,  # Codex backend requires streaming
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -75,11 +76,12 @@ class CodexBackendClient:
         Note: Codex backend API requires:
         - 'instructions' field (not 'messages')
         - 'store' field must be set to false
+        - 'stream' field must be set to true
 
         Args:
             messages: Chat messages (OpenAI format: [{"role": "user", "content": "..."}])
             model: Model name (default: gpt-5.3-codex)
-            stream: Whether to stream response (not yet implemented)
+            stream: Whether to stream response (Codex backend requires True)
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
 
         Returns:
@@ -96,6 +98,7 @@ class CodexBackendClient:
             "instructions": instructions,
             "model": model,
             "store": False,  # Required by Codex backend API
+            "stream": True,   # Codex backend requires streaming
         }
 
         # Add optional parameters
@@ -114,7 +117,7 @@ class CodexBackendClient:
             response = self._client.post(url, json=payload)
             response.raise_for_status()
 
-            # Parse response
+            # Parse response (always SSE for Codex backend)
             result = self._parse_response(response.text)
 
             log.debug(f"Codex backend response: content length={len(result.get('content', ''))}")
@@ -170,66 +173,17 @@ class CodexBackendClient:
         """
         Parse response from Codex backend API.
 
-        The response format is not standard OpenAI format.
-        We need to extract content and usage.
+        The response format is SSE (Server-Sent Events), not standard JSON.
+        We need to extract content and usage from SSE events.
 
         Args:
-            response_text: Raw response text
+            response_text: Raw response text (SSE format)
 
         Returns:
             Parsed dict with 'content', 'usage', etc.
         """
-        # Try to parse as JSON first
-        try:
-            data = json.loads(response_text)
-        except json.JSONDecodeError:
-            log.warning(f"Failed to parse response as JSON, length={len(response_text)}")
-            log.debug(f"Response preview: {response_text[:500]}")
-            return {
-                "content": response_text,
-                "usage": {},
-            }
-
-        # Check if this is an SSE stream response
-        # SSE responses are line-by-line with "data:" prefix
-        if "data:" in response_text or "\n\n" in response_text:
-            return self._parse_sse_response(response_text)
-
-        # Standard JSON response (if any)
-        # Try to extract content
-        content = None
-        usage = {}
-
-        # Different possible structures
-        if "message" in data:
-            content = data["message"].get("content")
-        elif "content" in data:
-            content = data["content"]
-        elif "choices" in data and len(data["choices"]) > 0:
-            # OpenAI-style format
-            choice = data["choices"][0]
-            if "message" in choice:
-                content = choice["message"].get("content")
-
-        # Try to extract usage
-        if "usage" in data:
-            usage_data = data["usage"]
-            usage = {
-                "prompt_tokens": usage_data.get("prompt_tokens", 0),
-                "completion_tokens": usage_data.get("completion_tokens", 0),
-                "total_tokens": usage_data.get("total_tokens", 0),
-            }
-
-        if content is None:
-            # Fallback: just return the raw data
-            log.warning(f"Could not extract content from response: {list(data.keys())}")
-            content = json.dumps(data, indent=2)
-
-        return {
-            "content": content,
-            "usage": usage,
-            "raw": data,
-        }
+        # Codex backend always returns SSE format
+        return self._parse_sse_response(response_text)
 
     def _parse_sse_response(self, response_text: str) -> Dict[str, Any]:
         """
