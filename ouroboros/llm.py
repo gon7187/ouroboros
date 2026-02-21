@@ -65,9 +65,9 @@ _PRICING_STATIC: Dict[str, Tuple[float, float, float]] = {
     "google/gemini-3-pro-preview": (2.0, 0.20, 12.0),
     "x-ai/grok-3-mini": (0.30, 0.03, 0.50),
     "qwen/qwen3.5-plus-02-15": (0.40, 0.04, 2.40),
-    "glm/glm-5": (0.002, 0.002, 0.002),
-    "glm/glm-4.7": (0.001, 0.001, 0.001),
-    "glm/glm-4.7-flashx": (0.0004, 0.0004, 0.0004),
+    "glm-5": (0.002, 0.002, 0.002),
+    "glm-4.7": (0.001, 0.001, 0.001),
+    "glm-4.7-flashx": (0.0004, 0.0004, 0.0004),
 }
 
 
@@ -76,11 +76,11 @@ _PRICING_STATIC: Dict[str, Tuple[float, float, float]] = {
 # ---------------------------------------------------------------------------
 
 _MODEL_PROFILES: Dict[str, ModelProfile] = {
-    "default": ModelProfile(model="glm/glm-4.7", effort="medium", temperature=0.0),
-    "light": ModelProfile(model="glm/glm-4.7-flashx", effort="low", temperature=0.0),
-    "code_task": ModelProfile(model="glm/glm-5", effort="medium", temperature=0.0),
-    "analysis": ModelProfile(model="glm/glm-5", effort="high", temperature=0.0),
-    "consciousness": ModelProfile(model="glm/glm-4.7-flashx", effort="low", temperature=0.0),
+    "default": ModelProfile(model="glm-4.7", effort="medium", temperature=0.0),
+    "light": ModelProfile(model="glm-4.7-flash", effort="low", temperature=0.0),
+    "code_task": ModelProfile(model="glm-5", effort="medium", temperature=0.0),
+    "analysis": ModelProfile(model="glm-5", effort="high", temperature=0.0),
+    "consciousness": ModelProfile(model="glm-4.7-flash", effort="low", temperature=0.0),
 }
 
 
@@ -134,7 +134,7 @@ class LLMClient:
         """
         self._providers: Dict[str, ProviderConfig] = {}
         self._clients: Dict[str, OpenAI] = {}
-        self._active_provider: str = "openrouter"
+        self._active_provider: str = "zai"
 
         if api_key:
             # Testing mode: create a test provider
@@ -151,17 +151,7 @@ class LLMClient:
 
     def _load_providers(self) -> None:
         """Load provider configurations from environment."""
-        # OpenRouter (primary)
-        or_key = os.environ.get("OPENROUTER_API_KEY", "")
-        if or_key:
-            self._providers["openrouter"] = ProviderConfig(
-                name="openrouter",
-                api_key=or_key,
-                base_url="https://openrouter.ai/api/v1",
-                requires_reasoning_effort=True,
-            )
-
-        # Z.ai
+        # Z.ai only (primary and working provider)
         zai_key = os.environ.get("ZAI_API_KEY", "")
         if zai_key:
             self._providers["zai"] = ProviderConfig(
@@ -171,33 +161,13 @@ class LLMClient:
                 requires_reasoning_effort=False,
             )
 
-        # OpenAI Codex
-        codex_key = os.environ.get("OPENAI_CODEX_KEY", "")
-        if codex_key:
-            self._providers["codex"] = ProviderConfig(
-                name="codex",
-                api_key=codex_key,
-                base_url=os.environ.get("OPENAI_CODEX_BASE_URL"),
-                requires_reasoning_effort=True,
-            )
-
-        # OpenCode
-        oc_key = os.environ.get("OPENCODE_API_KEY", "")
-        if oc_key:
-            self._providers["opencode"] = ProviderConfig(
-                name="opencode",
-                api_key=oc_key,
-                base_url=os.environ.get("OPENCODE_BASE_URL"),
-                requires_reasoning_effort=False,
-            )
-
-        # Set active provider
-        if not self._providers:
-            log.warning("No LLM providers configured!")
-        elif "openrouter" in self._providers:
-            self._active_provider = "openrouter"
-        else:
+        # Set active provider (always Z.ai if available)
+        if "zai" in self._providers:
+            self._active_provider = "zai"
+        elif self._providers:
             self._active_provider = next(iter(self._providers.keys()))
+        else:
+            log.warning("No LLM providers configured!")
 
         log.info(f"Loaded {len(self._providers)} LLM provider(s), active: {self._active_provider}")
 
@@ -280,7 +250,7 @@ class LLMClient:
         self,
         prompt: str,
         images: Optional[List[Dict[str, Any]]] = None,
-        model: str = "glm/glm-4.7",
+        model: str = "glm-4.7",
         max_tokens: int = 1024,
     ) -> Tuple[str, Dict[str, Any]]:
         """
