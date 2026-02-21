@@ -139,11 +139,11 @@ def _get_chat_agent():
     return _chat_agent
 
 
-def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple[str, str], Tuple[str, str, str]]] = None) -> None:
+def handle_chat_direct(chat_id: int, text: str, image_data: Optional[Union[Tuple[str, str], Tuple[str, str, str]]] = None, task_id: Optional[str] = None) -> None:
     try:
         agent = _get_chat_agent()
         task = {
-            "id": uuid.uuid4().hex[:8],
+            "id": task_id or uuid.uuid4().hex[:8],
             "type": "task",
             "chat_id": chat_id,
             "text": text,

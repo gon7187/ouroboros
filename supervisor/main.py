@@ -272,7 +272,7 @@ def _dispatch_owner_message(chat_id: int, text: str, image_data: Optional[tuple[
 
     th = threading.Thread(
         target=workers.handle_chat_direct,
-        args=(chat_id, text, image_data),
+        args=(chat_id, text, image_data, task_id),
         daemon=True,
         name=f"chat-{task_id}",
     )
@@ -342,9 +342,26 @@ def _acquire_singleton_lock(drive_root: pathlib.Path) -> Optional[tuple[pathlib.
             return False
         try:
             os.kill(pid, 0)
-            return True
         except OSError:
             return False
+
+        # Treat non-supervisor or zombie pid as stale lock owner.
+        try:
+            cmdline_path = pathlib.Path(f"/proc/{pid}/cmdline")
+            status_path = pathlib.Path(f"/proc/{pid}/status")
+            if not cmdline_path.exists() or not status_path.exists():
+                return False
+            cmdline = cmdline_path.read_bytes().replace(bytes([0]), b" ").decode("utf-8", "ignore")
+            if "supervisor.main" not in cmdline:
+                return False
+            status_txt = status_path.read_text(encoding="utf-8", errors="ignore")
+            if "State:	Z" in status_txt:
+                return False
+        except Exception:
+            # If process metadata can't be read, prefer stale-lock recovery.
+            return False
+
+        return True
 
     # Remove stale lock if owner process is gone
     if lock_path.exists():

@@ -216,11 +216,21 @@ def _build_health_invariants(env: Any) -> str:
     except Exception:
         pass
 
-    # 5. Duplicate processing detection: same owner message text appearing in multiple tasks
+    # 5. Duplicate processing detection: same owner message text routed to multiple tasks in short time window
     try:
         import hashlib
-        msg_hash_to_tasks: Dict[str, set] = {}
+        import datetime as _dt
+        msg_hash_to_entries: Dict[str, List[Tuple[str, float]]] = {}
         tail_bytes = 256_000
+
+        def _ts_to_epoch(ts_val: Any) -> float:
+            try:
+                if not ts_val:
+                    return 0.0
+                s = str(ts_val).replace("Z", "+00:00")
+                return _dt.datetime.fromisoformat(s).timestamp()
+            except Exception:
+                return 0.0
 
         def _scan_file_for_injected(path, type_field="type", type_value="owner_message_injected"):
             if not path.exists():
@@ -240,28 +250,41 @@ def _build_health_invariants(env: Any) -> str:
                             continue
                         text = ev.get("text", "")
                         if not text and "event_repr" in ev:
-                            # Historical entries in supervisor.jsonl lack "text";
-                            # try to extract task_id at least for presence detection
                             text = ev.get("event_repr", "")[:200]
                         if not text:
                             continue
                         text_hash = hashlib.md5(text.encode()).hexdigest()[:12]
                         tid = ev.get("task_id") or "unknown"
-                        if text_hash not in msg_hash_to_tasks:
-                            msg_hash_to_tasks[text_hash] = set()
-                        msg_hash_to_tasks[text_hash].add(tid)
+                        ts_epoch = _ts_to_epoch(ev.get("ts"))
+                        msg_hash_to_entries.setdefault(text_hash, []).append((str(tid), ts_epoch))
                     except (json.JSONDecodeError, ValueError):
                         continue
 
         _scan_file_for_injected(env.drive_path("logs/events.jsonl"))
-        # Also check supervisor.jsonl for historically unhandled events
         _scan_file_for_injected(
             env.drive_path("logs/supervisor.jsonl"),
             type_field="event_type",
             type_value="owner_message_injected",
         )
 
-        dupes = {h: tids for h, tids in msg_hash_to_tasks.items() if len(tids) > 1}
+        # Only treat as duplicate if same text maps to multiple task IDs within 30s window.
+        dupes: Dict[str, set] = {}
+        window_sec = 30.0
+        for h, entries in msg_hash_to_entries.items():
+            entries = sorted(entries, key=lambda x: x[1])
+            tids = set()
+            for i in range(len(entries)):
+                tid_i, ts_i = entries[i]
+                for j in range(i + 1, len(entries)):
+                    tid_j, ts_j = entries[j]
+                    if ts_j and ts_i and (ts_j - ts_i) > window_sec:
+                        break
+                    if tid_i != tid_j:
+                        tids.add(tid_i)
+                        tids.add(tid_j)
+            if len(tids) > 1:
+                dupes[h] = tids
+
         if dupes:
             checks.append(
                 f"CRITICAL: DUPLICATE PROCESSING — {len(dupes)} message(s) "

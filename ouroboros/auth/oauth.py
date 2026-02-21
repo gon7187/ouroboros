@@ -31,7 +31,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 import hashlib
 
 import httpx
@@ -156,7 +156,7 @@ class OAuthClient:
             "state": state,
         }
         
-        query_string = "&".join(f"{k}={v}" for k, v in params.items())
+        query_string = urlencode(params)
         return f"{self.config.authorization_endpoint}?{query_string}"
     
     def exchange_code_for_tokens(
